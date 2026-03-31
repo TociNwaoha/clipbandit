@@ -1,0 +1,21 @@
+"use client";
+
+import { Sidebar } from "./Sidebar";
+import { Header } from "./Header";
+
+interface DashboardLayoutProps {
+  title: string;
+  children: React.ReactNode;
+}
+
+export function DashboardLayout({ title, children }: DashboardLayoutProps) {
+  return (
+    <div className="flex min-h-screen bg-[#0F172A]">
+      <Sidebar />
+      <div className="flex flex-col flex-1 min-w-0">
+        <Header title={title} />
+        <main className="flex-1 px-8 py-6 overflow-auto">{children}</main>
+      </div>
+    </div>
+  );
+}

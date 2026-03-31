@@ -1,0 +1,127 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { signOut, useSession } from "next-auth/react";
+
+const navItems = [
+  {
+    label: "Dashboard",
+    href: "/dashboard",
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="3" y="3" width="7" height="7" rx="1" stroke="currentColor" strokeWidth="2"/>
+        <rect x="14" y="3" width="7" height="7" rx="1" stroke="currentColor" strokeWidth="2"/>
+        <rect x="3" y="14" width="7" height="7" rx="1" stroke="currentColor" strokeWidth="2"/>
+        <rect x="14" y="14" width="7" height="7" rx="1" stroke="currentColor" strokeWidth="2"/>
+      </svg>
+    ),
+  },
+  {
+    label: "Videos",
+    href: "/videos",
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="2" y="2" width="20" height="20" rx="3" stroke="currentColor" strokeWidth="2"/>
+        <path d="M10 8L16 12L10 16V8Z" fill="currentColor"/>
+      </svg>
+    ),
+  },
+  {
+    label: "Clips",
+    href: "/clips",
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M14.5 4H9.5L7 8H3V20H21V8H17L14.5 4Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/>
+        <circle cx="12" cy="14" r="3" stroke="currentColor" strokeWidth="2"/>
+      </svg>
+    ),
+  },
+  {
+    label: "Exports",
+    href: "/exports",
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M21 15V19C21 20.1046 20.1046 21 19 21H5C3.89543 21 3 20.1046 3 19V15" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+        <path d="M7 10L12 15L17 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+        <path d="M12 15V3" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+      </svg>
+    ),
+  },
+  {
+    label: "Settings",
+    href: "/settings",
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2"/>
+        <path d="M19.4 15C19.1 15.5 19.3 16.1 19.7 16.5L19.8 16.6C20.1 16.9 20.3 17.3 20.3 17.7C20.3 18.1 20.1 18.5 19.8 18.8C19.5 19.1 19.1 19.3 18.7 19.3C18.3 19.3 17.9 19.1 17.6 18.8L17.5 18.7C17.1 18.3 16.5 18.1 16 18.4C15.5 18.6 15.2 19.1 15.2 19.6V19.8C15.2 20.6 14.6 21.2 13.8 21.3C13.6 21.3 13.4 21.3 13.2 21.3C12.4 21.3 11.8 20.7 11.8 19.9V19.7C11.8 19.2 11.5 18.7 11 18.5C10.5 18.2 9.9 18.4 9.5 18.8L9.4 18.9C9.1 19.2 8.7 19.4 8.3 19.4C7.9 19.4 7.5 19.2 7.2 18.9C6.6 18.3 6.6 17.3 7.2 16.7L7.3 16.6C7.7 16.2 7.9 15.6 7.6 15.1C7.4 14.6 6.9 14.3 6.4 14.3H6.2C5.4 14.3 4.8 13.7 4.7 12.9C4.7 12.7 4.7 12.5 4.7 12.3C4.7 11.5 5.3 10.9 6.1 10.9H6.3C6.8 10.9 7.3 10.6 7.5 10.1C7.8 9.6 7.6 9 7.2 8.6L7.1 8.5C6.8 8.2 6.6 7.8 6.6 7.4C6.6 7 6.8 6.6 7.1 6.3C7.7 5.7 8.7 5.7 9.3 6.3L9.4 6.4C9.8 6.8 10.4 7 10.9 6.7C11.4 6.5 11.7 6 11.7 5.5V5.3C11.7 4.5 12.3 3.9 13.1 3.8C13.3 3.8 13.5 3.8 13.7 3.8C14.5 3.8 15.1 4.4 15.1 5.2V5.4C15.1 5.9 15.4 6.4 15.9 6.6C16.4 6.9 17 6.7 17.4 6.3L17.5 6.2C17.8 5.9 18.2 5.7 18.6 5.7C19 5.7 19.4 5.9 19.7 6.2C20.3 6.8 20.3 7.8 19.7 8.4L19.6 8.5C19.2 8.9 19 9.5 19.3 10C19.5 10.5 20 10.8 20.5 10.8H20.7C21.5 10.8 22.1 11.4 22.2 12.2C22.2 12.4 22.2 12.6 22.2 12.8C22.2 13.6 21.6 14.2 20.8 14.2H20.6C20.1 14.2 19.6 14.5 19.4 15Z" stroke="currentColor" strokeWidth="2"/>
+      </svg>
+    ),
+  },
+];
+
+export function Sidebar() {
+  const pathname = usePathname();
+  const { data: session } = useSession();
+  const userEmail = session?.user?.email || "";
+  const initials = userEmail.slice(0, 2).toUpperCase();
+
+  return (
+    <aside className="flex flex-col w-60 min-h-screen bg-[#1E293B] border-r border-slate-800">
+      {/* Logo */}
+      <div className="flex items-center gap-2.5 px-5 py-5 border-b border-slate-800">
+        <div className="w-7 h-7 rounded-md bg-[#7C3AED] flex items-center justify-center flex-shrink-0">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M5 3L19 12L5 21V3Z" fill="white" />
+          </svg>
+        </div>
+        <span className="text-base font-bold tracking-tight text-white">ClipBandit</span>
+      </div>
+
+      {/* Nav */}
+      <nav className="flex-1 px-3 py-4 space-y-0.5">
+        {navItems.map((item) => {
+          const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`
+                flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors
+                ${isActive
+                  ? "bg-[#7C3AED]/15 text-[#A78BFA]"
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+                }
+              `}
+            >
+              <span className={isActive ? "text-[#A78BFA]" : "text-slate-500"}>{item.icon}</span>
+              {item.label}
+            </Link>
+          );
+        })}
+      </nav>
+
+      {/* User footer */}
+      <div className="px-3 py-4 border-t border-slate-800">
+        <div className="flex items-center gap-3 px-2 mb-2">
+          <div className="w-8 h-8 rounded-full bg-[#7C3AED]/20 flex items-center justify-center flex-shrink-0">
+            <span className="text-xs font-semibold text-[#A78BFA]">{initials}</span>
+          </div>
+          <p className="text-xs text-slate-400 truncate flex-1">{userEmail}</p>
+        </div>
+        <button
+          onClick={() => signOut({ callbackUrl: "/login" })}
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-500
+                     hover:text-slate-200 hover:bg-slate-800 transition-colors"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M9 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V5C3 4.46957 3.21071 3.96086 3.58579 3.58579C3.96086 3.21071 4.46957 3 5 3H9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M16 17L21 12L16 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M21 12H9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          Sign out
+        </button>
+      </div>
+    </aside>
+  );
+}
