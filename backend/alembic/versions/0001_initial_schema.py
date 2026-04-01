@@ -15,25 +15,13 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Enums
-    op.execute("CREATE TYPE user_tier AS ENUM ('starter', 'creator', 'agency')")
-    op.execute("CREATE TYPE video_source_type AS ENUM ('upload', 'youtube')")
-    op.execute("CREATE TYPE video_status AS ENUM ('queued', 'downloading', 'transcribing', 'scoring', 'ready', 'error')")
-    op.execute("CREATE TYPE clip_status AS ENUM ('pending', 'ready', 'exported')")
-    op.execute("CREATE TYPE aspect_ratio AS ENUM ('9:16', '1:1')")
-    op.execute("CREATE TYPE caption_style AS ENUM ('bold_boxed', 'sermon_quote', 'clean_minimal')")
-    op.execute("CREATE TYPE caption_format AS ENUM ('burned_in', 'srt')")
-    op.execute("CREATE TYPE export_status AS ENUM ('queued', 'rendering', 'ready', 'error')")
-    op.execute("CREATE TYPE job_status AS ENUM ('queued', 'running', 'done', 'failed')")
-    op.execute("CREATE TYPE exclude_zone_source AS ENUM ('manual', 'auto_detected')")
-
     # users
     op.create_table(
         "users",
         sa.Column("id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
         sa.Column("email", sa.String(255), nullable=False),
         sa.Column("password_hash", sa.String(255), nullable=False),
-        sa.Column("tier", sa.Enum("starter", "creator", "agency", name="user_tier", create_type=False), nullable=False, server_default="starter"),
+        sa.Column("tier", sa.Enum("starter", "creator", "agency", name="user_tier"), nullable=False, server_default="starter"),
         sa.Column("videos_used", sa.Integer, nullable=False, server_default="0"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
@@ -46,13 +34,13 @@ def upgrade() -> None:
         sa.Column("id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
         sa.Column("user_id", UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
         sa.Column("title", sa.String(500)),
-        sa.Column("source_type", sa.Enum("upload", "youtube", name="video_source_type", create_type=False), nullable=False),
+        sa.Column("source_type", sa.Enum("upload", "youtube", name="video_source_type"), nullable=False),
         sa.Column("source_url", sa.Text),
         sa.Column("storage_key", sa.Text),
         sa.Column("duration_sec", sa.Integer),
         sa.Column("resolution", sa.String(20)),
         sa.Column("file_size_bytes", sa.BigInteger),
-        sa.Column("status", sa.Enum("queued", "downloading", "transcribing", "scoring", "ready", "error", name="video_status", create_type=False), nullable=False, server_default="queued"),
+        sa.Column("status", sa.Enum("queued", "downloading", "transcribing", "scoring", "ready", "error", name="video_status"), nullable=False, server_default="queued"),
         sa.Column("error_message", sa.Text),
         sa.Column("clip_count", sa.Integer, nullable=False, server_default="0"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
@@ -91,7 +79,7 @@ def upgrade() -> None:
         sa.Column("hashtags", ARRAY(sa.String)),
         sa.Column("thumbnail_key", sa.Text),
         sa.Column("transcript_text", sa.Text),
-        sa.Column("status", sa.Enum("pending", "ready", "exported", name="clip_status", create_type=False), nullable=False, server_default="pending"),
+        sa.Column("status", sa.Enum("pending", "ready", "exported", name="clip_status"), nullable=False, server_default="pending"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
     )
@@ -104,14 +92,14 @@ def upgrade() -> None:
         sa.Column("id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
         sa.Column("clip_id", UUID(as_uuid=True), sa.ForeignKey("clips.id", ondelete="CASCADE"), nullable=False),
         sa.Column("user_id", UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("aspect_ratio", sa.Enum("9:16", "1:1", name="aspect_ratio", create_type=False), nullable=False),
-        sa.Column("caption_style", sa.Enum("bold_boxed", "sermon_quote", "clean_minimal", name="caption_style", create_type=False)),
-        sa.Column("caption_format", sa.Enum("burned_in", "srt", name="caption_format", create_type=False), nullable=False),
+        sa.Column("aspect_ratio", sa.Enum("9:16", "1:1", name="aspect_ratio"), nullable=False),
+        sa.Column("caption_style", sa.Enum("bold_boxed", "sermon_quote", "clean_minimal", name="caption_style")),
+        sa.Column("caption_format", sa.Enum("burned_in", "srt", name="caption_format"), nullable=False),
         sa.Column("storage_key", sa.Text),
         sa.Column("srt_key", sa.Text),
         sa.Column("download_url", sa.Text),
         sa.Column("url_expires_at", sa.DateTime(timezone=True)),
-        sa.Column("status", sa.Enum("queued", "rendering", "ready", "error", name="export_status", create_type=False), nullable=False, server_default="queued"),
+        sa.Column("status", sa.Enum("queued", "rendering", "ready", "error", name="export_status"), nullable=False, server_default="queued"),
         sa.Column("error_message", sa.Text),
         sa.Column("render_time_sec", sa.Integer),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
@@ -127,7 +115,7 @@ def upgrade() -> None:
         sa.Column("video_id", UUID(as_uuid=True), sa.ForeignKey("videos.id", ondelete="CASCADE"), nullable=False),
         sa.Column("type", sa.String(50), nullable=False),
         sa.Column("payload", JSONB, nullable=False, server_default="{}"),
-        sa.Column("status", sa.Enum("queued", "running", "done", "failed", name="job_status", create_type=False), nullable=False, server_default="queued"),
+        sa.Column("status", sa.Enum("queued", "running", "done", "failed", name="job_status"), nullable=False, server_default="queued"),
         sa.Column("celery_task_id", sa.String(255)),
         sa.Column("attempts", sa.Integer, nullable=False, server_default="0"),
         sa.Column("max_attempts", sa.Integer, nullable=False, server_default="3"),
@@ -148,7 +136,7 @@ def upgrade() -> None:
         sa.Column("start_time", sa.Float, nullable=False),
         sa.Column("end_time", sa.Float, nullable=False),
         sa.Column("label", sa.String(100)),
-        sa.Column("source", sa.Enum("manual", "auto_detected", name="exclude_zone_source", create_type=False), nullable=False, server_default="manual"),
+        sa.Column("source", sa.Enum("manual", "auto_detected", name="exclude_zone_source"), nullable=False, server_default="manual"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
     )
 
