@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { api, ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -125,20 +126,24 @@ export function VideoList({ videos, loading, error, onRefresh, onOpenUpload }: V
       {sortedVideos.map((video) => (
         <Card key={video.id} className="relative">
           <div className="flex items-start gap-4">
-            <div className="h-20 w-36 rounded-lg bg-slate-700/60 border border-slate-600 flex-shrink-0" />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <h3 className="truncate text-base font-semibold text-white">{video.title || "Untitled video"}</h3>
-                <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusStyles[video.status] || statusStyles.queued}`}>
-                  {statusLabel(video.status)}
-                </span>
+            <Link href={`/videos/${video.id}`} className="flex min-w-0 flex-1 items-start gap-4 group">
+              <div className="h-20 w-36 rounded-lg bg-slate-700/60 border border-slate-600 flex-shrink-0 group-hover:border-[#7C3AED]/70 transition-colors" />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <h3 className="truncate text-base font-semibold text-white group-hover:text-[#A78BFA] transition-colors">
+                    {video.title || "Untitled video"}
+                  </h3>
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusStyles[video.status] || statusStyles.queued}`}>
+                    {statusLabel(video.status)}
+                  </span>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-slate-400">
+                  {formatDuration(video.duration_sec) && <span>{formatDuration(video.duration_sec)}</span>}
+                  {video.clip_count > 0 && <span>{video.clip_count} clips</span>}
+                  <span>{formatRelativeTime(video.created_at)}</span>
+                </div>
               </div>
-              <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-slate-400">
-                {formatDuration(video.duration_sec) && <span>{formatDuration(video.duration_sec)}</span>}
-                {video.clip_count > 0 && <span>{video.clip_count} clips</span>}
-                <span>{formatRelativeTime(video.created_at)}</span>
-              </div>
-            </div>
+            </Link>
 
             <div className="relative">
               <button

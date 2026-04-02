@@ -1,3 +1,4 @@
+import json
 import logging
 import uuid
 from pathlib import Path
@@ -22,6 +23,7 @@ from app.schemas.video import (
     VideoListItem,
     VideoResponse,
     VideoStatusResponse,
+    VideoTranscriptResponse,
     VideoUploadUrlRequest,
     VideoUploadUrlResponse,
 )
@@ -142,12 +144,20 @@ async def confirm_upload(
     job = Job(video_id=video.id, type="transcribe", status=JobStatus.queued, payload={})
     db.add(job)
     await db.flush()
+    await db.commit()
+    await db.refresh(video)
+    await db.refresh(job)
 
     try:
         from app.worker.tasks.transcribe import transcribe_job
 
-        task = transcribe_job.delay(str(video.id))
+        task = transcribe_job.apply_async(
+            args=[str(video.id)],
+            countdown=1,
+            queue="transcribe",
+        )
         job.celery_task_id = task.id
+        await db.commit()
     except Exception as exc:
         logger.warning(f"Unable to enqueue transcribe task for video {video.id}: {exc}")
 
@@ -180,12 +190,20 @@ async def import_youtube(
     job = Job(video_id=video.id, type="ingest", status=JobStatus.queued, payload={"url": url})
     db.add(job)
     await db.flush()
+    await db.commit()
+    await db.refresh(video)
+    await db.refresh(job)
 
     try:
         from app.worker.tasks.ingest import ingest_job
 
-        task = ingest_job.delay(str(video.id))
+        task = ingest_job.apply_async(
+            args=[str(video.id)],
+            countdown=1,
+            queue="ingest",
+        )
         job.celery_task_id = task.id
+        await db.commit()
     except Exception as exc:
         logger.warning(f"Unable to enqueue ingest task for video {video.id}: {exc}")
 
@@ -262,6 +280,70 @@ async def get_video_status(
     )
 
 
+@router.get("/videos/{video_id}/transcript", response_model=VideoTranscriptResponse)
+async def get_video_transcript(
+    video_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(Video).where(Video.id == video_id, Video.user_id == current_user.id)
+    )
+    video = result.scalar_one_or_none()
+    if not video:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
+
+    if video.status not in {VideoStatus.scoring, VideoStatus.ready}:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transcript not ready yet")
+
+    transcript_key = f"transcripts/{video.id}/transcript.json"
+    try:
+        transcript_text = r2_client.read_text_file(transcript_key)
+    except FileNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transcript file not found")
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transcript file not found")
+
+    try:
+        transcript_data = json.loads(transcript_text)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Transcript data is invalid")
+
+    segments = transcript_data.get("segments", [])
+    full_text = transcript_data.get("full_text")
+    if not full_text:
+        full_text = " ".join(
+            (segment.get("text", "") or "").strip()
+            for segment in segments
+            if (segment.get("text", "") or "").strip()
+        ).strip()
+
+    word_count = transcript_data.get("word_count")
+    if word_count is None:
+        words = transcript_data.get("words")
+        if isinstance(words, list):
+            word_count = len([word for word in words if (word or {}).get("word")])
+        else:
+            word_count = sum(
+                len(segment.get("words", []))
+                for segment in segments
+                if isinstance(segment, dict)
+            )
+
+    duration = transcript_data.get("duration")
+    if duration is None:
+        duration = float(video.duration_sec or 0)
+
+    return VideoTranscriptResponse(
+        video_id=video.id,
+        word_count=int(word_count or 0),
+        duration=float(duration or 0),
+        language=transcript_data.get("language"),
+        full_text=full_text,
+        segments=segments,
+    )
+
+
 @router.delete("/videos/{video_id}")
 async def delete_video(
     video_id: uuid.UUID,
@@ -278,6 +360,7 @@ async def delete_video(
     storage_keys: set[str] = set()
     if video.storage_key:
         storage_keys.add(video.storage_key)
+    storage_keys.add(f"transcripts/{video.id}/transcript.json")
 
     clip_result = await db.execute(select(Clip).where(Clip.video_id == video.id))
     clips = clip_result.scalars().all()

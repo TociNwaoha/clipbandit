@@ -78,3 +78,20 @@ class VideoStatusResponse(BaseModel):
     title: str | None
     clip_count: int
     error_message: str | None
+
+
+class TranscriptWordSegment(BaseModel):
+    word: str | None
+    start: float
+    end: float
+    confidence: float | None = None
+    segment_index: int | None = None
+
+
+class VideoTranscriptResponse(BaseModel):
+    video_id: uuid.UUID
+    word_count: int
+    duration: float
+    language: str | None
+    full_text: str
+    segments: list[dict]

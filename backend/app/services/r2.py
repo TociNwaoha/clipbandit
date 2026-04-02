@@ -21,6 +21,7 @@ class R2Client:
     def __init__(self):
         self._client = None
         self.use_local = False
+        self.bucket_name = settings.r2_bucket_name
         LOCAL_STORAGE_ROOT.mkdir(parents=True, exist_ok=True)
         self._init_client()
 
@@ -58,6 +59,11 @@ class R2Client:
         except Exception as exc:
             self.use_local = True
             logger.warning(f"Failed to initialize R2 client. Falling back to local storage: {exc}")
+
+    def _get_client(self):
+        if self.use_local or self._client is None:
+            raise RuntimeError("R2 client is not configured")
+        return self._client
 
     def _safe_local_path(self, key: str) -> Path:
         clean_key = key.lstrip("/")
@@ -143,6 +149,37 @@ class R2Client:
             )
         except ClientError as exc:
             logger.error(f"Failed to generate R2 presigned GET for {key}: {exc}")
+            raise
+
+    def download_file(self, key: str, destination_path: str) -> str:
+        if self.use_local:
+            source = self._safe_local_path(key)
+            destination = Path(destination_path)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if not source.exists():
+                raise FileNotFoundError(f"Storage key not found: {key}")
+            shutil.copy2(source, destination)
+            return destination_path
+
+        try:
+            self._get_client().download_file(self.bucket_name, key, destination_path)
+            return destination_path
+        except ClientError as exc:
+            logger.error(f"Failed to download {key}: {exc}")
+            raise
+
+    def read_text_file(self, key: str) -> str:
+        if self.use_local:
+            path = self._safe_local_path(key)
+            if not path.exists():
+                raise FileNotFoundError(f"Storage key not found: {key}")
+            return path.read_text(encoding="utf-8")
+
+        try:
+            response = self._get_client().get_object(Bucket=self.bucket_name, Key=key)
+            return response["Body"].read().decode("utf-8")
+        except ClientError as exc:
+            logger.error(f"Failed to read {key}: {exc}")
             raise
 
     def delete_file(self, key: str) -> bool:

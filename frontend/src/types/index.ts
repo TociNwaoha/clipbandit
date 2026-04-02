@@ -46,6 +46,29 @@ export interface VideoListItem {
   thumbnail_url: string | null;
 }
 
+export interface TranscriptSegmentPayload {
+  id: number;
+  start: number;
+  end: number;
+  text: string;
+  words: Array<{
+    word: string;
+    start: number;
+    end: number;
+    confidence?: number;
+    segment_index?: number;
+  }>;
+}
+
+export interface VideoTranscript {
+  video_id: string;
+  word_count: number;
+  duration: number;
+  language: string | null;
+  full_text: string;
+  segments: TranscriptSegmentPayload[];
+}
+
 export type ClipStatus = "pending" | "ready" | "exported";
 
 export interface Clip {
