@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import shutil
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,9 +16,68 @@ from app.models.transcript import TranscriptSegment
 from app.models.video import Video, VideoStatus
 from app.services.ffmpeg import extract_audio, get_video_duration, get_video_resolution
 from app.services.r2 import r2_client
-from app.services.transcription import transcribe_audio
+from app.services.transcription import get_model_with_metadata, transcribe_audio
 
 logger = logging.getLogger(__name__)
+
+
+class PerfTracker:
+    def __init__(self, video_id: str):
+        self.video_id = video_id
+        self.task_started_at = time.perf_counter()
+        self.phase_starts: dict[str, float] = {}
+        self.phase_durations: dict[str, float] = {}
+
+    def _elapsed(self) -> float:
+        return time.perf_counter() - self.task_started_at
+
+    @staticmethod
+    def _fmt_fields(fields: dict[str, object]) -> str:
+        parts: list[str] = []
+        for key, value in fields.items():
+            if isinstance(value, float):
+                parts.append(f"{key}={value:.3f}")
+            else:
+                parts.append(f"{key}={value}")
+        return " ".join(parts)
+
+    def mark(self, event: str, **fields: object) -> None:
+        extra = self._fmt_fields(fields)
+        logger.info(
+            "TRANSCRIBE_PERF video_id=%s event=%s elapsed_s=%.3f %s",
+            self.video_id,
+            event,
+            self._elapsed(),
+            extra,
+        )
+
+    def start(self, phase: str, **fields: object) -> None:
+        self.phase_starts[phase] = time.perf_counter()
+        self.mark(f"{phase}_start", **fields)
+
+    def end(self, phase: str, **fields: object) -> float:
+        started_at = self.phase_starts.get(phase)
+        if started_at is None:
+            self.mark(f"{phase}_end_missing_start", **fields)
+            return 0.0
+        duration = time.perf_counter() - started_at
+        self.phase_durations[phase] = duration
+        self.mark(f"{phase}_end", duration_s=duration, **fields)
+        return duration
+
+    def summary(self, **fields: object) -> None:
+        payload = {
+            "total_task_s": round(self._elapsed(), 3),
+            "phase_durations_s": {
+                key: round(value, 3) for key, value in sorted(self.phase_durations.items())
+            },
+            **fields,
+        }
+        logger.info(
+            "TRANSCRIBE_PERF_SUMMARY video_id=%s data=%s",
+            self.video_id,
+            json.dumps(payload, sort_keys=True),
+        )
 
 
 def _latest_transcribe_job(db, video_uuid: uuid.UUID) -> Job | None:
@@ -52,7 +112,10 @@ def transcribe_job(self, video_id: str):
     7. Trigger score_job (stub for now)
     8. Clean up /tmp files
     """
+    perf = PerfTracker(video_id)
+    perf.mark("task_received")
     tmp_dir = Path(f"/tmp/clipbandit/{video_id}")
+    queue_delay_s: float | None = None
 
     try:
         video_uuid = uuid.UUID(video_id)
@@ -67,6 +130,15 @@ def transcribe_job(self, video_id: str):
 
             job = _latest_transcribe_job(db, video_uuid)
             if job:
+                if job.created_at:
+                    now_utc = datetime.now(timezone.utc)
+                    created_at = (
+                        job.created_at.replace(tzinfo=timezone.utc)
+                        if job.created_at.tzinfo is None
+                        else job.created_at
+                    )
+                    queue_delay_s = max((now_utc - created_at).total_seconds(), 0.0)
+                    perf.mark("queue_delay_computed", queue_delay_s=queue_delay_s)
                 job.status = JobStatus.running
                 job.started_at = datetime.now(timezone.utc)
                 job.attempts = (job.attempts or 0) + 1
@@ -79,7 +151,9 @@ def transcribe_job(self, video_id: str):
 
             if not video.storage_key:
                 raise FileNotFoundError("Video storage key is missing")
+            perf.start("file_read_source_locate", storage_key=video.storage_key)
             r2_client.download_file(video.storage_key, str(video_path))
+            perf.end("file_read_source_locate")
             logger.info(f"Video downloaded to {video_path}")
 
             if not video.duration_sec:
@@ -94,16 +168,33 @@ def transcribe_job(self, video_id: str):
             db.commit()
 
         audio_path = tmp_dir / "audio.wav"
+        perf.start("ffmpeg_audio_extraction", input_path=str(video_path), output_path=str(audio_path))
         extract_audio(str(video_path), str(audio_path))
+        perf.end("ffmpeg_audio_extraction")
         logger.info(f"Audio extracted: {audio_path}")
 
-        result = transcribe_audio(str(audio_path), language="en")
+        perf.start("whisper_model_load")
+        model, loaded_from_cache, model_name = get_model_with_metadata()
+        model_load_duration_s = perf.end(
+            "whisper_model_load",
+            model_name=model_name,
+            loaded_from_cache=loaded_from_cache,
+        )
+
+        perf.start("transcription_inference", model_name=model_name)
+        result = transcribe_audio(str(audio_path), language="en", model=model)
+        inference_duration_s = perf.end(
+            "transcription_inference",
+            model_name=model_name,
+            word_count=len(result["words"]),
+        )
 
         with SyncSessionLocal() as db:
             video = db.execute(select(Video).where(Video.id == video_uuid)).scalars().first()
             if not video:
                 raise ValueError(f"Video not found while saving transcript: {video_id}")
 
+            perf.start("db_save", operation="transcript_segments")
             db.query(TranscriptSegment).filter(TranscriptSegment.video_id == video_uuid).delete()
             db.commit()
 
@@ -125,6 +216,7 @@ def transcribe_job(self, video_id: str):
             if segments_to_insert:
                 db.bulk_save_objects(segments_to_insert)
                 db.commit()
+            perf.end("db_save", inserted_segments=len(segments_to_insert))
 
             logger.info(f"Saved {len(segments_to_insert)} word segments to DB")
 
@@ -146,9 +238,12 @@ def transcribe_job(self, video_id: str):
             }
             transcript_path = tmp_dir / "transcript.json"
             transcript_path.write_text(json.dumps(transcript_payload, indent=2), encoding="utf-8")
+            perf.start("transcript_storage_save", transcript_key=transcript_key)
             r2_client.upload_file(str(transcript_path), transcript_key)
+            perf.end("transcript_storage_save", transcript_key=transcript_key)
             logger.info(f"Transcript saved to storage: {transcript_key}")
 
+            perf.start("final_status_update", target_status=VideoStatus.scoring.value)
             video.status = VideoStatus.scoring
             video.error_message = None
             db.commit()
@@ -159,20 +254,30 @@ def transcribe_job(self, video_id: str):
                 job.error = None
                 job.completed_at = datetime.now(timezone.utc)
                 db.commit()
+            perf.end("final_status_update", target_status=VideoStatus.scoring.value)
 
             from app.worker.tasks.score import score_job
 
+            perf.start("score_trigger")
             score_job.apply_async(
                 args=[video_id],
                 countdown=1,
                 queue="score",
             )
+            perf.end("score_trigger")
 
             logger.info(f"Transcription complete for {video_id}. Triggered score_job.")
+            perf.summary(
+                status="success",
+                queue_delay_s=round(queue_delay_s, 3) if queue_delay_s is not None else None,
+                model_load_s=round(model_load_duration_s, 3),
+                transcription_inference_s=round(inference_duration_s, 3),
+            )
             return {"video_id": video_id, "status": "scoring"}
 
     except Exception as exc:
         logger.exception(f"Transcription failed for video {video_id}: {exc}")
+        perf.mark("task_error", error_type=type(exc).__name__)
 
         with SyncSessionLocal() as db:
             video = db.execute(select(Video).where(Video.id == video_uuid)).scalars().first()
@@ -186,6 +291,12 @@ def transcribe_job(self, video_id: str):
                 job.error = str(exc)[:500]
                 job.completed_at = datetime.now(timezone.utc)
             db.commit()
+
+        perf.summary(
+            status="failed",
+            error_type=type(exc).__name__,
+            queue_delay_s=round(queue_delay_s, 3) if queue_delay_s is not None else None,
+        )
 
         if not isinstance(exc, (ValueError, FileNotFoundError)):
             raise self.retry(exc=exc, countdown=60)

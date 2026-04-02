@@ -43,6 +43,16 @@ class Settings(BaseSettings):
     max_upload_size_mb: int = 5000
     max_concurrent_jobs: int = 2
 
+    # Transcription
+    whisper_model_size: str = "medium"
+    whisper_device: str = "cpu"
+    whisper_compute_type: str = "int8"
+    whisper_download_root: str = "/tmp/whisper-models"
+    whisper_num_workers: int = 2
+    whisper_beam_size: int = 5
+    whisper_best_of: int = 5
+    whisper_condition_on_previous_text: bool = True
+
     class Config:
         env_file = ".env"
         case_sensitive = False

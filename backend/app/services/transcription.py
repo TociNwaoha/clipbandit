@@ -1,12 +1,19 @@
+import json
 import logging
+import time
+from threading import Lock
 from typing import Any
 
 from faster_whisper import WhisperModel
+
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 # Module-level model instance — loaded once, reused across jobs.
 _model: WhisperModel | None = None
+_model_name: str | None = None
+_model_lock = Lock()
 
 
 def get_model() -> WhisperModel:
@@ -15,21 +22,57 @@ def get_model() -> WhisperModel:
     Uses medium model with int8 quantization for CPU efficiency.
     Downloads model on first call (~1.5GB, one-time).
     """
+    model, _, _ = get_model_with_metadata()
+    return model
+
+
+def get_model_with_metadata() -> tuple[WhisperModel, bool, str]:
+    """
+    Return the singleton model and metadata about cache usage.
+
+    Returns:
+      model: WhisperModel instance
+      loaded_from_cache: True when reusing an in-process model
+      model_name: active model name
+    """
     global _model
-    if _model is None:
-        logger.info("Loading faster-whisper medium model (first time ~2 min)...")
-        _model = WhisperModel(
-            "medium",
-            device="cpu",
-            compute_type="int8",
-            download_root="/tmp/whisper-models",
-            num_workers=2,
+    global _model_name
+
+    requested_model = settings.whisper_model_size
+    loaded_from_cache = False
+
+    with _model_lock:
+        if _model is not None and _model_name == requested_model:
+            loaded_from_cache = True
+            return _model, loaded_from_cache, requested_model
+
+        load_started = time.perf_counter()
+        logger.info(
+            "TRANSCRIBE_PERF event=whisper_model_load_internal_start model=%s",
+            requested_model,
         )
-        logger.info("Whisper model loaded successfully")
-    return _model
+        _model = WhisperModel(
+            requested_model,
+            device=settings.whisper_device,
+            compute_type=settings.whisper_compute_type,
+            download_root=settings.whisper_download_root,
+            num_workers=settings.whisper_num_workers,
+        )
+        _model_name = requested_model
+        load_elapsed = time.perf_counter() - load_started
+        logger.info(
+            "TRANSCRIBE_PERF event=whisper_model_load_internal_end model=%s duration_s=%.3f",
+            requested_model,
+            load_elapsed,
+        )
+        return _model, loaded_from_cache, requested_model
 
 
-def transcribe_audio(audio_path: str, language: str = "en") -> dict[str, Any]:
+def transcribe_audio(
+    audio_path: str,
+    language: str = "en",
+    model: WhisperModel | None = None,
+) -> dict[str, Any]:
     """
     Transcribe audio file and return word-level timestamps.
 
@@ -39,17 +82,17 @@ def transcribe_audio(audio_path: str, language: str = "en") -> dict[str, Any]:
       language: detected language
       duration: total audio duration in seconds
     """
-    model = get_model()
+    model = model or get_model()
     logger.info(f"Starting transcription of {audio_path}")
 
     segments_raw, info = model.transcribe(
         audio_path,
         language=language,
         word_timestamps=True,
-        beam_size=5,
-        best_of=5,
+        beam_size=settings.whisper_beam_size,
+        best_of=settings.whisper_best_of,
         temperature=0.0,
-        condition_on_previous_text=True,
+        condition_on_previous_text=settings.whisper_condition_on_previous_text,
         vad_filter=True,
         vad_parameters=dict(min_silence_duration_ms=500),
     )
@@ -85,6 +128,18 @@ def transcribe_audio(audio_path: str, language: str = "en") -> dict[str, Any]:
     logger.info(
         f"Transcription complete: {len(all_words)} words, {len(segments)} segments, "
         f"detected language: {info.language}"
+    )
+
+    logger.debug(
+        "TRANSCRIBE_PERF event=transcribe_audio_result summary=%s",
+        json.dumps(
+            {
+                "word_count": len(all_words),
+                "segment_count": len(segments),
+                "language": info.language,
+            },
+            sort_keys=True,
+        ),
     )
 
     return {
