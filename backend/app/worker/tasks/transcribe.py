@@ -11,3 +11,7 @@ def transcribe_video(self, video_id: str):
     # Implementation in Prompt 3
     logger.info(f"[transcribe] Completed transcription for video {video_id}")
     return {"video_id": video_id, "status": "done"}
+
+
+# Prompt 2 naming compatibility.
+transcribe_job = transcribe_video

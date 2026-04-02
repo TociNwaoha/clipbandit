@@ -1,21 +1,51 @@
 import logging
+import os
+import shutil
+from pathlib import Path
+from typing import BinaryIO
+from urllib.parse import quote
+
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
+
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+LOCAL_STORAGE_ROOT = Path("/tmp/clipbandit-storage")
+LOCAL_UPLOAD_URL = "http://147.93.6.2:8000/api/storage/local-upload"
+LOCAL_DOWNLOAD_BASE = "http://147.93.6.2:8000/api/storage/local"
 
 
 class R2Client:
     def __init__(self):
         self._client = None
-        self._available = False
+        self.use_local = False
+        LOCAL_STORAGE_ROOT.mkdir(parents=True, exist_ok=True)
         self._init_client()
 
+    def _is_placeholder(self, value: str | None) -> bool:
+        if value is None:
+            return True
+        normalized = value.strip().lower()
+        return normalized == "" or normalized == "placeholder" or "placeholder" in normalized
+
+    def _credentials_ready(self) -> bool:
+        required_values = (
+            settings.r2_account_id,
+            settings.r2_access_key_id,
+            settings.r2_secret_access_key,
+            settings.r2_bucket_name,
+            settings.r2_endpoint_url,
+        )
+        return not any(self._is_placeholder(value) for value in required_values)
+
     def _init_client(self):
-        if settings.r2_account_id == "placeholder" or settings.r2_access_key_id == "placeholder":
-            logger.warning("R2 credentials are placeholders — storage operations will be skipped")
+        if not self._credentials_ready():
+            self.use_local = True
+            logger.warning("R2 credentials are placeholders. Falling back to local storage at /tmp/clipbandit-storage.")
             return
+
         try:
             self._client = boto3.client(
                 "s3",
@@ -24,65 +54,138 @@ class R2Client:
                 aws_secret_access_key=settings.r2_secret_access_key,
                 region_name="auto",
             )
-            self._available = True
+            self.use_local = False
         except Exception as exc:
-            logger.warning(f"Failed to initialize R2 client: {exc}")
+            self.use_local = True
+            logger.warning(f"Failed to initialize R2 client. Falling back to local storage: {exc}")
 
-    @property
-    def available(self) -> bool:
-        return self._available
+    def _safe_local_path(self, key: str) -> Path:
+        clean_key = key.lstrip("/")
+        if not clean_key:
+            raise ValueError("Storage key cannot be empty")
 
-    def upload_file(self, file_path: str, storage_key: str, content_type: str = "application/octet-stream") -> bool:
-        if not self._available:
-            logger.warning(f"R2 not available — skipping upload of {storage_key}")
-            return False
+        root = LOCAL_STORAGE_ROOT.resolve()
+        target = (LOCAL_STORAGE_ROOT / clean_key).resolve()
+        if target != root and root not in target.parents:
+            raise ValueError("Invalid storage key path")
+        return target
+
+    def upload_file(self, file_path: str, key: str) -> str:
+        if self.use_local:
+            destination = self._safe_local_path(key)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(file_path, destination)
+            return key
+
         try:
-            self._client.upload_file(
-                file_path,
-                settings.r2_bucket_name,
-                storage_key,
-                ExtraArgs={"ContentType": content_type},
-            )
-            return True
+            self._client.upload_file(file_path, settings.r2_bucket_name, key)
+            return key
         except (ClientError, NoCredentialsError) as exc:
-            logger.error(f"R2 upload failed for {storage_key}: {exc}")
-            return False
+            logger.error(f"R2 upload_file failed for {key}: {exc}")
+            raise
 
-    def get_presigned_upload_url(self, storage_key: str, expires_in: int = 3600) -> str | None:
-        if not self._available:
-            return None
+    def upload_fileobj(self, file_obj: BinaryIO, key: str, content_type: str | None = None) -> str:
+        if self.use_local:
+            destination = self._safe_local_path(key)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if hasattr(file_obj, "seek"):
+                file_obj.seek(0)
+            with destination.open("wb") as out:
+                shutil.copyfileobj(file_obj, out)
+            return key
+
+        extra_args = {"ContentType": content_type} if content_type else None
         try:
-            return self._client.generate_presigned_url(
-                "put_object",
-                Params={"Bucket": settings.r2_bucket_name, "Key": storage_key},
-                ExpiresIn=expires_in,
-            )
-        except ClientError as exc:
-            logger.error(f"Failed to generate upload URL for {storage_key}: {exc}")
-            return None
+            if extra_args:
+                self._client.upload_fileobj(file_obj, settings.r2_bucket_name, key, ExtraArgs=extra_args)
+            else:
+                self._client.upload_fileobj(file_obj, settings.r2_bucket_name, key)
+            return key
+        except (ClientError, NoCredentialsError) as exc:
+            logger.error(f"R2 upload_fileobj failed for {key}: {exc}")
+            raise
 
-    def get_presigned_download_url(self, storage_key: str, expires_in: int = 3600) -> str | None:
-        if not self._available:
-            return None
+    def get_presigned_upload_url(self, key: str, expiry: int = 900) -> dict:
+        if self.use_local:
+            return {
+                "url": LOCAL_UPLOAD_URL,
+                "key": key,
+                "fields": {},
+                "use_local": True,
+            }
+
+        try:
+            response = self._client.generate_presigned_post(
+                Bucket=settings.r2_bucket_name,
+                Key=key,
+                ExpiresIn=expiry,
+            )
+            return {
+                "url": response["url"],
+                "key": key,
+                "fields": response.get("fields", {}),
+                "use_local": False,
+            }
+        except ClientError as exc:
+            logger.error(f"Failed to generate R2 presigned POST for {key}: {exc}")
+            raise
+
+    def get_presigned_download_url(self, key: str, expiry: int = 86400) -> str:
+        if self.use_local:
+            encoded_key = quote(key.lstrip("/"), safe="/")
+            return f"{LOCAL_DOWNLOAD_BASE}/{encoded_key}"
+
         try:
             return self._client.generate_presigned_url(
                 "get_object",
-                Params={"Bucket": settings.r2_bucket_name, "Key": storage_key},
-                ExpiresIn=expires_in,
+                Params={"Bucket": settings.r2_bucket_name, "Key": key},
+                ExpiresIn=expiry,
             )
         except ClientError as exc:
-            logger.error(f"Failed to generate download URL for {storage_key}: {exc}")
-            return None
+            logger.error(f"Failed to generate R2 presigned GET for {key}: {exc}")
+            raise
 
-    def delete_file(self, storage_key: str) -> bool:
-        if not self._available:
-            return False
+    def delete_file(self, key: str) -> bool:
+        if self.use_local:
+            try:
+                file_path = self._safe_local_path(key)
+            except ValueError:
+                return False
+            if not file_path.exists():
+                return False
+            file_path.unlink(missing_ok=True)
+            self._cleanup_empty_parents(file_path.parent)
+            return True
+
         try:
-            self._client.delete_object(Bucket=settings.r2_bucket_name, Key=storage_key)
+            self._client.delete_object(Bucket=settings.r2_bucket_name, Key=key)
             return True
         except ClientError as exc:
-            logger.error(f"R2 delete failed for {storage_key}: {exc}")
+            logger.error(f"R2 delete failed for {key}: {exc}")
             return False
+
+    def file_exists(self, key: str) -> bool:
+        if self.use_local:
+            try:
+                file_path = self._safe_local_path(key)
+            except ValueError:
+                return False
+            return file_path.exists() and file_path.is_file()
+
+        try:
+            self._client.head_object(Bucket=settings.r2_bucket_name, Key=key)
+            return True
+        except ClientError:
+            return False
+
+    def _cleanup_empty_parents(self, start: Path):
+        root = LOCAL_STORAGE_ROOT.resolve()
+        current = start.resolve()
+        while current != root:
+            if any(current.iterdir()):
+                break
+            os.rmdir(current)
+            current = current.parent
 
 
 r2_client = R2Client()

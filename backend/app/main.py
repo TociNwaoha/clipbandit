@@ -8,7 +8,7 @@ from passlib.context import CryptContext
 
 from app.config import settings
 from app.database import engine, SessionLocal
-from app.api.routes import health, auth, videos, clips, exports
+from app.api.routes import health, auth, videos, clips, exports, storage
 
 logging.basicConfig(level=settings.log_level)
 logger = logging.getLogger(__name__)
@@ -93,3 +93,4 @@ app.include_router(auth.router, prefix="/api")
 app.include_router(videos.router, prefix="/api")
 app.include_router(clips.router, prefix="/api")
 app.include_router(exports.router, prefix="/api")
+app.include_router(storage.router, prefix="/api")

@@ -33,6 +33,17 @@ export interface Video {
   clip_count: number;
   created_at: string;
   updated_at: string;
+  thumbnail_url?: string | null;
+}
+
+export interface VideoListItem {
+  id: string;
+  title: string | null;
+  status: VideoStatus;
+  duration_sec: number | null;
+  clip_count: number;
+  created_at: string;
+  thumbnail_url: string | null;
 }
 
 export type ClipStatus = "pending" | "ready" | "exported";
