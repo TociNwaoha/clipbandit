@@ -53,6 +53,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
+      - clipbandit_storage:/tmp/clipbandit-storage
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -78,6 +79,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
+      - clipbandit_storage:/tmp/clipbandit-storage
     command: celery -A app.celery_app worker --loglevel=info --concurrency=2 -Q ingest,transcribe,score,render
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.celery_app inspect ping -d celery@$$HOSTNAME --timeout 10"]
@@ -116,3 +118,4 @@ networks:
 volumes:
   postgres_data:
   redis_data:
+  clipbandit_storage:
