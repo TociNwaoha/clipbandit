@@ -44,14 +44,14 @@ class Settings(BaseSettings):
     max_concurrent_jobs: int = 2
 
     # Transcription
-    whisper_model_size: str = "medium"
+    whisper_model_size: str = "small"
     whisper_device: str = "cpu"
     whisper_compute_type: str = "int8"
     whisper_download_root: str = "/tmp/whisper-models"
     whisper_num_workers: int = 2
-    whisper_beam_size: int = 5
-    whisper_best_of: int = 5
-    whisper_condition_on_previous_text: bool = True
+    whisper_beam_size: int = 1
+    whisper_best_of: int = 1
+    whisper_condition_on_previous_text: bool = False
 
     class Config:
         env_file = ".env"
