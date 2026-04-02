@@ -115,10 +115,10 @@ def transcribe_job(self, video_id: str):
                     TranscriptSegment(
                         video_id=video_uuid,
                         word=word_data["word"],
-                        start_time=word_data["start"],
-                        end_time=word_data["end"],
-                        confidence=word_data["confidence"],
-                        segment_index=word_data["segment_index"],
+                        start_time=float(word_data["start"]),
+                        end_time=float(word_data["end"]),
+                        confidence=float(word_data["confidence"]),
+                        segment_index=int(word_data["segment_index"]),
                     )
                 )
 
@@ -138,8 +138,8 @@ def transcribe_job(self, video_id: str):
             transcript_payload = {
                 "video_id": video_id,
                 "language": result["language"],
-                "language_probability": result["language_probability"],
-                "duration": result["duration"],
+                "language_probability": float(result["language_probability"]),
+                "duration": float(result["duration"]),
                 "word_count": len(result["words"]),
                 "full_text": full_text,
                 "segments": result["segments"],

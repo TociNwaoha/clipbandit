@@ -61,8 +61,8 @@ def transcribe_audio(audio_path: str, language: str = "en") -> dict[str, Any]:
     for segment in segments_raw:
         seg_dict = {
             "id": segment_index,
-            "start": segment.start,
-            "end": segment.end,
+            "start": float(segment.start),
+            "end": float(segment.end),
             "text": segment.text.strip(),
             "words": [],
         }
@@ -71,9 +71,9 @@ def transcribe_audio(audio_path: str, language: str = "en") -> dict[str, Any]:
             for word in segment.words:
                 word_dict = {
                     "word": word.word.strip(),
-                    "start": word.start,
-                    "end": word.end,
-                    "confidence": round(word.probability, 4),
+                    "start": float(word.start),
+                    "end": float(word.end),
+                    "confidence": float(round(float(word.probability), 4)),
                     "segment_index": segment_index,
                 }
                 seg_dict["words"].append(word_dict)
@@ -91,6 +91,6 @@ def transcribe_audio(audio_path: str, language: str = "en") -> dict[str, Any]:
         "segments": segments,
         "words": all_words,
         "language": info.language,
-        "language_probability": round(info.language_probability, 4),
-        "duration": info.duration,
+        "language_probability": float(round(float(info.language_probability), 4)),
+        "duration": float(info.duration or 0.0),
     }
