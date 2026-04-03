@@ -1,47 +1,334 @@
 import logging
+import shutil
 import uuid
+from datetime import datetime, timezone
+from pathlib import Path
 
+from sqlalchemy import delete
 from sqlalchemy import select
 
 from app.celery_app import celery_app
 from app.database import SyncSessionLocal
+from app.models.clip import Clip, ClipStatus
+from app.models.exclude_zone import ExcludeZone
+from app.models.job import Job, JobStatus
+from app.models.transcript import TranscriptSegment
 from app.models.video import Video, VideoStatus
+from app.services.ffmpeg import extract_audio, extract_thumbnail
+from app.services.r2 import r2_client
+from app.services.scoring import (
+    CandidateWindow,
+    apply_exclude_zones,
+    build_chunks,
+    build_energy_profile,
+    build_word_tokens,
+    calculate_energy_score,
+    calculate_hook_score,
+    extract_window_text,
+    generate_candidate_ranges,
+    select_top_candidates,
+)
+from app.services.storage import clip_thumbnail_key
 
 logger = logging.getLogger(__name__)
 
 
-@celery_app.task(name="app.worker.tasks.score.score_job", queue="score", bind=True)
-def score_job(self, video_id: str):
-    """
-    Stub for Prompt 4 — clip scoring.
-    For now: log that we received the job and update
-    video status to "ready" so the UI shows completion.
-    This will be fully implemented in Prompt 4.
-    """
-    db = SyncSessionLocal()
+MIN_CLIP_DURATION_SEC = 15.0
+MAX_CLIP_DURATION_SEC = 40.0
+TOP_N_CLIPS = 10
+MAX_OVERLAP_RATIO = 0.55
+PAUSE_GAP_SEC = 1.0
+ENERGY_BUCKET_SEC = 0.5
+MIN_WORDS_PER_CLIP = 20
 
-    try:
-        logger.info(
-            f"score_job received for video {video_id} "
-            f"(stub — full implementation in Prompt 4)"
+
+def _latest_score_job(db, video_uuid: uuid.UUID) -> Job | None:
+    return (
+        db.execute(
+            select(Job)
+            .where(Job.video_id == video_uuid, Job.type == "score")
+            .order_by(Job.created_at.desc())
+        )
+        .scalars()
+        .first()
+    )
+
+
+def _build_clip_title(text: str, clip_number: int) -> str:
+    trimmed = " ".join(text.split())
+    if not trimmed:
+        return f"Clip {clip_number}"
+    if len(trimmed) <= 72:
+        return trimmed
+    return f"{trimmed[:69].rstrip()}..."
+
+
+def _build_scored_candidates(
+    transcript_words: list[TranscriptSegment],
+    exclude_zones: list[ExcludeZone],
+    audio_path: str,
+) -> tuple[list[CandidateWindow], dict[str, int | float]]:
+    tokens = build_word_tokens(transcript_words)
+    if not tokens:
+        return [], {
+            "word_count": 0,
+            "raw_candidate_count": 0,
+            "filtered_candidate_count": 0,
+            "selected_candidate_count": 0,
+        }
+
+    chunks = build_chunks(tokens, pause_gap_sec=PAUSE_GAP_SEC)
+    candidate_ranges = generate_candidate_ranges(
+        chunks=chunks,
+        tokens=tokens,
+        min_duration_sec=MIN_CLIP_DURATION_SEC,
+        max_duration_sec=MAX_CLIP_DURATION_SEC,
+        min_words=MIN_WORDS_PER_CLIP,
+    )
+
+    energy_profile = build_energy_profile(audio_path, bucket_size_sec=ENERGY_BUCKET_SEC)
+
+    raw_count = len(candidate_ranges)
+    filtered_candidates: list[CandidateWindow] = []
+    for start, end in candidate_ranges:
+        adjusted = apply_exclude_zones(
+            start=start,
+            end=end,
+            zones=exclude_zones,
+            min_duration_sec=MIN_CLIP_DURATION_SEC,
+        )
+        if not adjusted:
+            continue
+
+        adjusted_start, adjusted_end = adjusted
+        transcript_text = extract_window_text(tokens, adjusted_start, adjusted_end)
+        if len(transcript_text.split()) < MIN_WORDS_PER_CLIP:
+            continue
+
+        hook_score = calculate_hook_score(transcript_text, adjusted_start)
+        energy_score = calculate_energy_score(adjusted_start, adjusted_end, energy_profile)
+        combined_score = round((0.65 * hook_score) + (0.35 * energy_score), 4)
+
+        filtered_candidates.append(
+            CandidateWindow(
+                start=adjusted_start,
+                end=adjusted_end,
+                transcript_text=transcript_text,
+                hook_score=hook_score,
+                energy_score=energy_score,
+                combined_score=combined_score,
+            )
         )
 
+    selected = select_top_candidates(
+        candidates=filtered_candidates,
+        top_n=TOP_N_CLIPS,
+        max_overlap_ratio=MAX_OVERLAP_RATIO,
+    )
+    stats = {
+        "word_count": len(tokens),
+        "raw_candidate_count": raw_count,
+        "filtered_candidate_count": len(filtered_candidates),
+        "selected_candidate_count": len(selected),
+    }
+    return selected, stats
+
+
+@celery_app.task(name="app.worker.tasks.score.score_job", queue="score", bind=True)
+def score_job(self, video_id: str):
+    tmp_dir = Path(f"/tmp/clipbandit-score/{video_id}")
+    logger.info("[score] score_job received for video_id=%s", video_id)
+    video_uuid: uuid.UUID | None = None
+    storage_key: str | None = None
+
+    try:
         try:
             video_uuid = uuid.UUID(video_id)
         except ValueError:
-            logger.warning(f"score_job got invalid video id: {video_id}")
-            return
+            raise ValueError(f"score_job got invalid video id: {video_id}")
 
-        video = db.execute(select(Video).where(Video.id == video_uuid)).scalars().first()
-        if video:
+        with SyncSessionLocal() as db:
+            video = db.execute(select(Video).where(Video.id == video_uuid)).scalars().first()
+            if not video:
+                raise ValueError(f"Video not found: {video_id}")
+            if not video.storage_key:
+                raise FileNotFoundError(f"Video storage key missing for {video_id}")
+            storage_key = video.storage_key
+
+            score_row = _latest_score_job(db, video_uuid)
+            if not score_row:
+                score_row = Job(
+                    video_id=video_uuid,
+                    type="score",
+                    payload={},
+                    status=JobStatus.queued,
+                )
+                db.add(score_row)
+                db.flush()
+
+            score_row.status = JobStatus.running
+            score_row.started_at = datetime.now(timezone.utc)
+            score_row.attempts = (score_row.attempts or 0) + 1
+            db.commit()
+
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        local_video_path = tmp_dir / "original.mp4"
+        local_audio_path = tmp_dir / "audio.wav"
+
+        if storage_key is None:
+            raise FileNotFoundError(f"Video storage key missing for {video_id}")
+
+        logger.info("[score] loading media source for video_id=%s", video_id)
+        r2_client.download_file(storage_key, str(local_video_path))
+        logger.info("[score] media source ready at %s", local_video_path)
+
+        logger.info("[score] audio analysis start for video_id=%s", video_id)
+        extract_audio(str(local_video_path), str(local_audio_path))
+        logger.info("[score] audio analysis end for video_id=%s", video_id)
+
+        with SyncSessionLocal() as db:
+            video = db.execute(select(Video).where(Video.id == video_uuid)).scalars().first()
+            if not video:
+                raise ValueError(f"Video not found during scoring: {video_id}")
+
+            transcript_words = (
+                db.execute(
+                    select(TranscriptSegment)
+                    .where(TranscriptSegment.video_id == video_uuid)
+                    .order_by(TranscriptSegment.start_time.asc())
+                )
+                .scalars()
+                .all()
+            )
+            exclude_zones = (
+                db.execute(
+                    select(ExcludeZone)
+                    .where(ExcludeZone.video_id == video_uuid)
+                    .order_by(ExcludeZone.start_time.asc())
+                )
+                .scalars()
+                .all()
+            )
+
+            logger.info(
+                "[score] transcript loaded for video_id=%s word_rows=%s exclude_zones=%s",
+                video_id,
+                len(transcript_words),
+                len(exclude_zones),
+            )
+
+        selected_candidates, stats = _build_scored_candidates(
+            transcript_words=transcript_words,
+            exclude_zones=exclude_zones,
+            audio_path=str(local_audio_path),
+        )
+        logger.info(
+            "[score] candidate counts video_id=%s raw=%s filtered=%s selected=%s",
+            video_id,
+            stats["raw_candidate_count"],
+            stats["filtered_candidate_count"],
+            stats["selected_candidate_count"],
+        )
+
+        with SyncSessionLocal() as db:
+            video = db.execute(select(Video).where(Video.id == video_uuid)).scalars().first()
+            if not video:
+                raise ValueError(f"Video not found while persisting clips: {video_id}")
+
+            db.execute(delete(Clip).where(Clip.video_id == video_uuid))
+            db.commit()
+
+            created_clips: list[Clip] = []
+            for idx, candidate in enumerate(selected_candidates, start=1):
+                clip = Clip(
+                    video_id=video_uuid,
+                    start_time=round(candidate.start, 3),
+                    end_time=round(candidate.end, 3),
+                    duration_sec=round(candidate.duration, 3),
+                    score=candidate.combined_score,
+                    hook_score=candidate.hook_score,
+                    energy_score=candidate.energy_score,
+                    transcript_text=candidate.transcript_text,
+                    status=ClipStatus.ready,
+                    title=_build_clip_title(candidate.transcript_text, idx),
+                )
+                db.add(clip)
+                created_clips.append(clip)
+
+            db.flush()
+            logger.info("[score] db write prepared video_id=%s clip_rows=%s", video_id, len(created_clips))
+
+            thumbnail_success = 0
+            thumbnail_failed = 0
+            for clip in created_clips:
+                midpoint = clip.start_time + ((clip.end_time - clip.start_time) / 2.0)
+                thumb_local_path = tmp_dir / f"thumb-{clip.id}.jpg"
+                thumb_storage_key = clip_thumbnail_key(str(video.user_id), str(video.id), str(clip.id))
+
+                try:
+                    extract_thumbnail(str(local_video_path), str(thumb_local_path), midpoint)
+                    r2_client.upload_file(str(thumb_local_path), thumb_storage_key)
+                    clip.thumbnail_key = thumb_storage_key
+                    thumbnail_success += 1
+                except Exception as thumb_exc:
+                    clip.thumbnail_key = None
+                    thumbnail_failed += 1
+                    logger.warning(
+                        "[score] thumbnail generation failed video_id=%s clip_id=%s error=%s",
+                        video_id,
+                        clip.id,
+                        thumb_exc,
+                    )
+
+            video.clip_count = len(created_clips)
             video.status = VideoStatus.ready
             video.error_message = None
+
+            score_row = _latest_score_job(db, video_uuid)
+            if score_row:
+                score_row.status = JobStatus.done
+                score_row.error = None
+                score_row.completed_at = datetime.now(timezone.utc)
+
             db.commit()
-            logger.info(f"Video {video_id} marked ready (stub)")
+            logger.info(
+                "[score] final db write complete video_id=%s clip_count=%s thumbnails_ok=%s thumbnails_failed=%s",
+                video_id,
+                len(created_clips),
+                thumbnail_success,
+                thumbnail_failed,
+            )
+
+        if not selected_candidates:
+            logger.info("[score] no strong clips found video_id=%s status=ready clip_count=0", video_id)
+        logger.info("[score] final status update video_id=%s status=ready", video_id)
+        return {
+            "video_id": video_id,
+            "status": "ready",
+            "clip_count": len(selected_candidates),
+            "stats": stats,
+        }
     except Exception as exc:
-        logger.exception(f"score_job stub failed: {exc}")
+        logger.exception("[score] score_job failed for video_id=%s: %s", video_id, exc)
+        if video_uuid is not None:
+            try:
+                with SyncSessionLocal() as db:
+                    video = db.execute(select(Video).where(Video.id == video_uuid)).scalars().first()
+                    if video:
+                        video.status = VideoStatus.error
+                        video.error_message = str(exc)[:500]
+
+                    score_row = _latest_score_job(db, video_uuid)
+                    if score_row:
+                        score_row.status = JobStatus.failed
+                        score_row.error = str(exc)[:500]
+                        score_row.completed_at = datetime.now(timezone.utc)
+                    db.commit()
+            except Exception as inner_exc:
+                logger.exception("[score] failed to write error state for video_id=%s: %s", video_id, inner_exc)
+        raise
     finally:
-        db.close()
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 # Prompt 2 naming compatibility.

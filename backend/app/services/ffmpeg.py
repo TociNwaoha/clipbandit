@@ -94,3 +94,34 @@ def get_video_resolution(video_path: str) -> str:
     except Exception as exc:
         logger.warning(f"Could not get video resolution: {exc}")
         return ""
+
+
+def extract_thumbnail(video_path: str, output_path: str, timestamp_sec: float) -> str:
+    """
+    Extract a single-frame JPG thumbnail from a video at `timestamp_sec`.
+    """
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    safe_timestamp = max(float(timestamp_sec), 0.0)
+
+    cmd = [
+        "ffmpeg",
+        "-ss", f"{safe_timestamp:.3f}",
+        "-i", video_path,
+        "-frames:v", "1",
+        "-q:v", "2",
+        "-y",
+        output_path,
+    ]
+
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    if result.returncode != 0:
+        raise RuntimeError(f"FFmpeg thumbnail extraction failed: {result.stderr}")
+
+    logger.info(f"Thumbnail extracted to {output_path}")
+    return output_path

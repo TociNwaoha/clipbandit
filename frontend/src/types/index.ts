@@ -83,6 +83,7 @@ export interface Clip {
   title: string | null;
   hashtags: string[] | null;
   thumbnail_key: string | null;
+  thumbnail_url: string | null;
   transcript_text: string | null;
   status: ClipStatus;
   created_at: string;

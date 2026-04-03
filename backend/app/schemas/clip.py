@@ -16,6 +16,7 @@ class ClipResponse(BaseModel):
     title: str | None
     hashtags: list[str] | None
     thumbnail_key: str | None
+    thumbnail_url: str | None = None
     transcript_text: str | None
     status: ClipStatus
     created_at: datetime

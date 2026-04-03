@@ -248,22 +248,33 @@ def transcribe_job(self, video_id: str):
             video.error_message = None
             db.commit()
 
-            job = _latest_transcribe_job(db, video_uuid)
-            if job:
-                job.status = JobStatus.done
-                job.error = None
-                job.completed_at = datetime.now(timezone.utc)
-                db.commit()
+            transcribe_row = _latest_transcribe_job(db, video_uuid)
+            if transcribe_row:
+                transcribe_row.status = JobStatus.done
+                transcribe_row.error = None
+                transcribe_row.completed_at = datetime.now(timezone.utc)
+
+            score_row = Job(
+                video_id=video_uuid,
+                type="score",
+                payload={},
+                status=JobStatus.queued,
+            )
+            db.add(score_row)
+            db.commit()
+            db.refresh(score_row)
             perf.end("final_status_update", target_status=VideoStatus.scoring.value)
 
             from app.worker.tasks.score import score_job
 
             perf.start("score_trigger")
-            score_job.apply_async(
+            task = score_job.apply_async(
                 args=[video_id],
                 countdown=1,
                 queue="score",
             )
+            score_row.celery_task_id = task.id
+            db.commit()
             perf.end("score_trigger")
 
             logger.info(f"Transcription complete for {video_id}. Triggered score_job.")
