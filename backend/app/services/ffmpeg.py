@@ -108,6 +108,7 @@ def extract_thumbnail(video_path: str, output_path: str, timestamp_sec: float) -
         "-ss", f"{safe_timestamp:.3f}",
         "-i", video_path,
         "-frames:v", "1",
+        "-update", "1",
         "-q:v", "2",
         "-y",
         output_path,
