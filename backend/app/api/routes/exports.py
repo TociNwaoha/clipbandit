@@ -18,6 +18,10 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def _enum_value(value):
+    return value.value if hasattr(value, "value") else value
+
+
 @router.get("/exports", response_model=list[ExportResponse])
 async def list_exports(
     clip_id: uuid.UUID | None = Query(default=None),
@@ -87,9 +91,9 @@ async def create_export(
         payload={
             "export_id": str(export.id),
             "clip_id": str(body.clip_id),
-            "aspect_ratio": body.aspect_ratio.value,
-            "caption_style": body.caption_style.value if body.caption_style else None,
-            "caption_format": body.caption_format.value,
+            "aspect_ratio": _enum_value(body.aspect_ratio),
+            "caption_style": _enum_value(body.caption_style) if body.caption_style else None,
+            "caption_format": _enum_value(body.caption_format),
         },
     )
     db.add(render_job)
