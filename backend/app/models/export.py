@@ -41,7 +41,12 @@ class Export(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     aspect_ratio: Mapped[AspectRatio] = mapped_column(
-        SAEnum(AspectRatio, name="aspect_ratio"), nullable=False
+        SAEnum(
+            AspectRatio,
+            name="aspect_ratio",
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+        ),
+        nullable=False,
     )
     caption_style: Mapped[CaptionStyle | None] = mapped_column(
         SAEnum(CaptionStyle, name="caption_style")
