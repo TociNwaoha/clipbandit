@@ -1,26 +1,53 @@
 import logging
+import shutil
+import time
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 from sqlalchemy import select
 
 from app.celery_app import celery_app
 from app.database import SyncSessionLocal
-from app.models.export import Export, ExportStatus
+from app.models.clip import Clip, ClipStatus
+from app.models.export import CaptionFormat, Export, ExportStatus
 from app.models.job import Job, JobStatus
+from app.models.transcript import TranscriptSegment
+from app.models.video import Video
+from app.services.r2 import r2_client
+from app.services.rendering import (
+    build_subtitle_cues,
+    has_video_stream,
+    render_video_clip,
+    write_ass,
+    write_srt,
+)
+from app.services.storage import export_srt_key, export_video_key
 
 logger = logging.getLogger(__name__)
 
 
+class RenderPipelineError(Exception):
+    pass
+
+
+def _find_render_job(db, video_id: uuid.UUID, explicit_job_id: uuid.UUID | None) -> Job | None:
+    if explicit_job_id:
+        return db.execute(select(Job).where(Job.id == explicit_job_id)).scalars().first()
+    return (
+        db.execute(
+            select(Job)
+            .where(Job.video_id == video_id, Job.type == "render")
+            .order_by(Job.created_at.desc())
+        )
+        .scalars()
+        .first()
+    )
+
+
 @celery_app.task(name="app.worker.tasks.render.render_export", bind=True, queue="render", max_retries=0)
 def render_export(self, export_id: str, job_id: str | None = None):
-    """
-    Prompt 5 MVP behavior:
-    - Export creation is real and enqueued.
-    - Render lifecycle is honest.
-    - Full FFmpeg render pipeline lands in Prompt 6.
-    """
-    logger.info("[render] task received export_id=%s job_id=%s", export_id, job_id)
+    logger.info("[render] render job start export_id=%s job_id=%s", export_id, job_id)
 
     try:
         export_uuid = uuid.UUID(export_id)
@@ -35,47 +62,175 @@ def render_export(self, export_id: str, job_id: str | None = None):
         except ValueError:
             logger.warning("[render] invalid job id: %s", job_id)
 
-    with SyncSessionLocal() as db:
-        export = db.execute(select(Export).where(Export.id == export_uuid)).scalars().first()
-        if not export:
-            logger.error("[render] export not found export_id=%s", export_id)
-            if job_uuid:
-                job = db.execute(select(Job).where(Job.id == job_uuid)).scalars().first()
-                if job:
-                    job.status = JobStatus.failed
-                    job.error = f"Export not found: {export_id}"
-                    job.completed_at = datetime.now(timezone.utc)
-                    db.commit()
-            return {"export_id": export_id, "status": "error", "message": "export not found"}
+    started = time.perf_counter()
+    tmp_dir = Path(f"/tmp/clipbandit-render/{export_id}")
+    tmp_dir.mkdir(parents=True, exist_ok=True)
 
-        job: Job | None = None
-        if job_uuid:
-            job = db.execute(select(Job).where(Job.id == job_uuid)).scalars().first()
-            if job:
-                job.status = JobStatus.running
-                job.started_at = datetime.now(timezone.utc)
-                job.attempts = (job.attempts or 0) + 1
+    try:
+        with SyncSessionLocal() as db:
+            load_result = db.execute(
+                select(Export, Clip, Video)
+                .join(Clip, Export.clip_id == Clip.id)
+                .join(Video, Clip.video_id == Video.id)
+                .where(Export.id == export_uuid)
+            ).first()
+            if not load_result:
+                raise RenderPipelineError(f"Export not found: {export_id}")
 
-        export.status = ExportStatus.rendering
-        export.error_message = None
-        db.commit()
-        logger.info("[render] export status set to rendering export_id=%s", export_id)
+            export, clip, video = load_result
+            logger.info(
+                "[render] export loaded export_id=%s clip_id=%s video_id=%s status=%s",
+                export.id,
+                clip.id,
+                video.id,
+                export.status,
+            )
 
-        # Honest status until full renderer is implemented.
-        not_implemented_message = "Render pipeline is not implemented yet. Prompt 6 will produce final files."
-        export.status = ExportStatus.error
-        export.error_message = not_implemented_message
+            render_job = _find_render_job(db, video.id, job_uuid)
+            if render_job:
+                render_job.status = JobStatus.running
+                render_job.started_at = datetime.now(timezone.utc)
+                render_job.attempts = (render_job.attempts or 0) + 1
 
-        if job:
-            job.status = JobStatus.failed
-            job.error = not_implemented_message
-            job.completed_at = datetime.now(timezone.utc)
+            export.status = ExportStatus.rendering
+            export.error_message = None
+            export.render_time_sec = None
+            db.commit()
 
-        db.commit()
-        logger.info("[render] export marked error (expected stub) export_id=%s", export_id)
+            if not video.storage_key:
+                raise RenderPipelineError("Source media key is missing for this clip/video")
 
-    return {
-        "export_id": export_id,
-        "status": "error",
-        "message": "render stub active",
-    }
+            source_path = tmp_dir / "source.mp4"
+            logger.info("[render] source media resolution start export_id=%s key=%s", export.id, video.storage_key)
+            r2_client.download_file(video.storage_key, str(source_path))
+            logger.info("[render] source media resolved export_id=%s path=%s", export.id, source_path)
+
+            if not has_video_stream(str(source_path)):
+                raise RenderPipelineError("Source media is audio-only and cannot be exported as video")
+
+            transcript_rows = (
+                db.execute(
+                    select(TranscriptSegment)
+                    .where(
+                        TranscriptSegment.video_id == video.id,
+                        TranscriptSegment.start_time < clip.end_time,
+                        TranscriptSegment.end_time > clip.start_time,
+                    )
+                    .order_by(TranscriptSegment.start_time.asc())
+                )
+                .scalars()
+                .all()
+            )
+            logger.info(
+                "[render] caption generation start export_id=%s transcript_words=%s",
+                export.id,
+                len(transcript_rows),
+            )
+            cues = build_subtitle_cues(
+                transcript_rows,
+                clip_start=float(clip.start_time),
+                clip_end=float(clip.end_time),
+            )
+            if not cues:
+                raise RenderPipelineError("No transcript timing found for this clip window; cannot render captions")
+
+            srt_local_path = tmp_dir / "captions.srt"
+            write_srt(cues, str(srt_local_path))
+
+            ass_local_path: Path | None = None
+            if export.caption_format == CaptionFormat.burned_in:
+                ass_local_path = tmp_dir / "captions.ass"
+                write_ass(cues, str(ass_local_path), _enum_value(export.caption_style))
+            logger.info("[render] caption generation end export_id=%s cues=%s", export.id, len(cues))
+
+            output_path = tmp_dir / "output.mp4"
+            logger.info(
+                "[render] ffmpeg render start export_id=%s aspect_ratio=%s caption_format=%s",
+                export.id,
+                _enum_value(export.aspect_ratio),
+                _enum_value(export.caption_format),
+            )
+            render_video_clip(
+                source_path=str(source_path),
+                output_path=str(output_path),
+                clip_start=float(clip.start_time),
+                clip_end=float(clip.end_time),
+                aspect_ratio=_enum_value(export.aspect_ratio),
+                burned_ass_path=str(ass_local_path) if ass_local_path else None,
+            )
+            logger.info("[render] ffmpeg render end export_id=%s output=%s", export.id, output_path)
+
+            output_key = export_video_key(
+                str(export.user_id),
+                str(clip.id),
+                str(export.id),
+                _enum_value(export.aspect_ratio),
+            )
+            r2_client.upload_file(str(output_path), output_key)
+            logger.info("[render] output upload complete export_id=%s storage_key=%s", export.id, output_key)
+
+            export.storage_key = output_key
+            export.download_url = None
+            export.url_expires_at = None
+            export.srt_key = None
+
+            if export.caption_format == CaptionFormat.srt:
+                srt_key = export_srt_key(str(export.user_id), str(clip.id), str(export.id))
+                r2_client.upload_file(str(srt_local_path), srt_key)
+                export.srt_key = srt_key
+                logger.info("[render] srt sidecar upload complete export_id=%s srt_key=%s", export.id, srt_key)
+
+            export.status = ExportStatus.ready
+            export.error_message = None
+            export.render_time_sec = int(round(time.perf_counter() - started))
+            clip.status = ClipStatus.exported
+
+            if render_job:
+                render_job.status = JobStatus.done
+                render_job.error = None
+                render_job.completed_at = datetime.now(timezone.utc)
+
+            db.commit()
+            logger.info(
+                "[render] final export status update export_id=%s status=%s render_time_sec=%s",
+                export.id,
+                export.status,
+                export.render_time_sec,
+            )
+
+            return {"export_id": str(export.id), "status": export.status.value}
+    except Exception as exc:
+        user_message = str(exc)
+        logger.exception("[render] render failed export_id=%s error=%s", export_id, user_message)
+
+        with SyncSessionLocal() as db:
+            load_result = db.execute(
+                select(Export, Clip, Video)
+                .join(Clip, Export.clip_id == Clip.id)
+                .join(Video, Clip.video_id == Video.id)
+                .where(Export.id == export_uuid)
+            ).first()
+            if load_result:
+                export, _, video = load_result
+                render_job = _find_render_job(db, video.id, job_uuid)
+
+                export.status = ExportStatus.error
+                export.error_message = user_message[:500]
+                export.download_url = None
+                export.url_expires_at = None
+
+                if render_job:
+                    render_job.status = JobStatus.failed
+                    render_job.error = user_message[:500]
+                    render_job.completed_at = datetime.now(timezone.utc)
+
+                db.commit()
+                logger.info("[render] final export status update export_id=%s status=error", export.id)
+
+        return {"export_id": export_id, "status": "error", "message": user_message[:500]}
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def _enum_value(value):
+    return value.value if hasattr(value, "value") else value

@@ -106,10 +106,12 @@ export interface Export {
   storage_key: string | null;
   srt_key: string | null;
   download_url: string | null;
+  srt_download_url?: string | null;
   url_expires_at: string | null;
   status: ExportStatus;
   error_message: string | null;
   render_time_sec: number | null;
+  reused?: boolean;
   created_at: string;
   updated_at: string;
 }

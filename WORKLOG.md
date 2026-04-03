@@ -1,42 +1,39 @@
 # WORKLOG
 
 ## Current Task
-- Prompt 5: Build clip review/editor and export setup MVP.
+- Prompt 6: Build first real downloadable export render pipeline.
 
 ## Context
-- Prompt 4 scoring/thumbnails already complete and deployed.
-- Keep export initiation/status honest without faking render completion.
-- Focus on upload-based review/edit/export-start flow.
+- Prompt 5 editor/export-start flow exists and is deployed.
+- Render worker currently needs real FFmpeg output generation.
+- Dedupe behavior locked: reuse active identical export and return `reused=true`.
 
 ## Files Touched
-- backend/app/api/routes/clips.py
 - backend/app/api/routes/exports.py
-- backend/app/api/routes/videos.py
-- backend/app/schemas/clip.py
-- backend/app/schemas/video.py
+- backend/app/schemas/export.py
 - backend/app/worker/tasks/render.py
-- frontend/src/lib/api.ts
+- backend/app/services/rendering.py
 - frontend/src/types/index.ts
-- frontend/src/components/videos/VideoDetailPanel.tsx
 - frontend/src/components/videos/ClipEditorPanel.tsx
-- frontend/src/app/videos/[id]/clips/[clipId]/page.tsx
 
 ## Decisions Made
-- Added `PATCH /api/clips/{clip_id}` with ownership + timing validation (clip-only update, no rescore).
-- Added export list filter by `clip_id` and single export read endpoint.
-- Export creation now creates export row + render job row + enqueue action.
-- Render worker marks export/job statuses honestly (`rendering` then explicit `error` until Prompt 6 render pipeline).
-- Video detail API now returns `source_download_url` for reliable editor preview.
-- Added dedicated editor route `/videos/[id]/clips/[clipId]`.
+- Export API now derives download URLs from storage keys at response time.
+- Export API dedupes identical active exports (`queued|rendering`) and returns 200 + `reused=true`.
+- Render worker now builds subtitles, renders real MP4 clip exports, uploads artifacts, and marks `ready`.
+- SRT sidecar is produced and exposed when `caption_format=srt`.
+- Audio-only render input fails explicitly with a useful error message.
 
 ## Risks / Assumptions
-- Full render file generation remains out of scope until Prompt 6.
-- Editor preview depends on a valid source download URL from storage.
+- Output resolution is fixed for MVP transforms (CPU-friendly deterministic behavior).
+- Captioning relies on transcript word timing availability for the clip window.
 
 ## Next Steps
-- Commit Prompt 5 changes (exclude unrelated local files).
-- Push to `main`.
-- Deploy on VPS and verify edit/export flow end-to-end.
+- Commit Prompt 6 changes (exclude unrelated local files).
+- Push and deploy to VPS.
+- Verify end-to-end export flows (burned-in, SRT, dedupe, audio-only failure).
 
 ## Handoff Notes
-- Keep status handling honest: no fake `ready` export files.
+- Keep export status transitions honest (`queued -> rendering -> ready|error`).
+
+
+## Things to come back to ange polish/ any features that can be improved

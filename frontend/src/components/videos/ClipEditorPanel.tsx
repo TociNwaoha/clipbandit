@@ -191,8 +191,20 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
         caption_style: captionStyle,
         caption_format: captionFormat,
       });
-      setExports((prev) => [created, ...prev]);
-      setCreateExportMessage("Export created and queued.");
+      setExports((prev) => {
+        const existingIndex = prev.findIndex((item) => item.id === created.id);
+        if (existingIndex >= 0) {
+          const next = [...prev];
+          next[existingIndex] = created;
+          return next;
+        }
+        return [created, ...prev];
+      });
+      if (created.reused) {
+        setCreateExportMessage("Identical export is already in progress. Reusing existing export.");
+      } else {
+        setCreateExportMessage("Export created and queued.");
+      }
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "Failed to create export";
       setExportError(message);
@@ -426,14 +438,26 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
                 </div>
                 {item.error_message ? <p className="mt-3 text-xs text-red-400">{item.error_message}</p> : null}
                 {item.status === "ready" && item.download_url ? (
-                  <a
-                    href={item.download_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="mt-3 inline-flex text-xs text-[#A78BFA] hover:text-[#C4B5FD]"
-                  >
-                    Download export
-                  </a>
+                  <div className="mt-3 flex flex-wrap items-center gap-4">
+                    <a
+                      href={item.download_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex text-xs text-[#A78BFA] hover:text-[#C4B5FD]"
+                    >
+                      Download export
+                    </a>
+                    {item.srt_download_url ? (
+                      <a
+                        href={item.srt_download_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex text-xs text-[#A78BFA] hover:text-[#C4B5FD]"
+                      >
+                        Download captions (.srt)
+                      </a>
+                    ) : null}
+                  </div>
                 ) : null}
                 {item.status === "ready" && !item.download_url ? (
                   <p className="mt-3 text-xs text-slate-400">Export is ready but no download URL is available yet.</p>

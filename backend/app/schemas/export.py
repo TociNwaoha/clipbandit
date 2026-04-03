@@ -21,10 +21,12 @@ class ExportResponse(BaseModel):
     storage_key: str | None
     srt_key: str | None
     download_url: str | None
+    srt_download_url: str | None = None
     url_expires_at: datetime | None
     status: ExportStatus
     error_message: str | None
     render_time_sec: int | None
+    reused: bool = False
     created_at: datetime
     updated_at: datetime
 
