@@ -15,6 +15,7 @@ from app.models.job import Job, JobStatus
 from app.models.transcript import TranscriptSegment
 from app.models.video import Video, VideoStatus
 from app.services.ffmpeg import extract_audio, extract_thumbnail
+from app.services.ai_copy import AICopyUnavailableError, generate_clip_copy, provider_configured
 from app.services.r2 import r2_client
 from app.services.scoring import (
     CandidateWindow,
@@ -297,6 +298,81 @@ def score_job(self, video_id: str):
                 len(created_clips),
                 thumbnail_success,
                 thumbnail_failed,
+            )
+
+            clip_ids = [clip.id for clip in created_clips]
+
+        if clip_ids:
+            logger.info("[score] ai copy generation start video_id=%s clip_count=%s", video_id, len(clip_ids))
+            copy_ready_count = 0
+            copy_unavailable_count = 0
+
+            with SyncSessionLocal() as copy_db:
+                copy_video = copy_db.execute(select(Video).where(Video.id == video_uuid)).scalars().first()
+                copy_video_title = copy_video.title if copy_video else None
+
+                if not provider_configured():
+                    for clip_id in clip_ids:
+                        clip_row = copy_db.execute(select(Clip).where(Clip.id == clip_id)).scalars().first()
+                        if not clip_row:
+                            continue
+                        clip_row.title_options = None
+                        clip_row.hashtag_options = None
+                        clip_row.copy_generation_status = "unavailable"
+                        clip_row.copy_generation_error = "DEEPSEEK_API_KEY is not configured"
+                        copy_unavailable_count += 1
+                    copy_db.commit()
+                    logger.warning("[score] ai copy unavailable video_id=%s reason=missing_api_key", video_id)
+                else:
+                    for clip_id in clip_ids:
+                        clip_row = copy_db.execute(select(Clip).where(Clip.id == clip_id)).scalars().first()
+                        if not clip_row:
+                            continue
+                        try:
+                            copy_result = generate_clip_copy(
+                                transcript_text=clip_row.transcript_text or "",
+                                video_title=copy_video_title,
+                                clip_start=clip_row.start_time,
+                                clip_end=clip_row.end_time,
+                            )
+                            clip_row.title_options = copy_result.title_options
+                            clip_row.hashtag_options = copy_result.hashtag_options
+                            clip_row.copy_generation_status = "ready"
+                            clip_row.copy_generation_error = None
+                            clip_row.title = copy_result.title_options[0]
+                            clip_row.hashtags = copy_result.hashtag_options[0]
+                            copy_ready_count += 1
+                        except AICopyUnavailableError as exc:
+                            clip_row.title_options = None
+                            clip_row.hashtag_options = None
+                            clip_row.copy_generation_status = "unavailable"
+                            clip_row.copy_generation_error = str(exc)[:500]
+                            copy_unavailable_count += 1
+                            logger.warning(
+                                "[score] ai copy unavailable video_id=%s clip_id=%s error=%s",
+                                video_id,
+                                clip_id,
+                                exc,
+                            )
+                        except Exception as exc:
+                            clip_row.title_options = None
+                            clip_row.hashtag_options = None
+                            clip_row.copy_generation_status = "unavailable"
+                            clip_row.copy_generation_error = str(exc)[:500]
+                            copy_unavailable_count += 1
+                            logger.warning(
+                                "[score] ai copy generation failed video_id=%s clip_id=%s error=%s",
+                                video_id,
+                                clip_id,
+                                exc,
+                            )
+                    copy_db.commit()
+
+            logger.info(
+                "[score] ai copy generation end video_id=%s ready=%s unavailable=%s",
+                video_id,
+                copy_ready_count,
+                copy_unavailable_count,
             )
 
         if not selected_candidates:

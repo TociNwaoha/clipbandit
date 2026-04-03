@@ -21,6 +21,10 @@ class ClipResponse(BaseModel):
     energy_score: float | None
     title: str | None
     hashtags: list[str] | None
+    title_options: list[str] | None
+    hashtag_options: list[list[str]] | None
+    copy_generation_status: str | None
+    copy_generation_error: str | None
     thumbnail_key: str | None
     thumbnail_url: str | None = None
     transcript_text: str | None

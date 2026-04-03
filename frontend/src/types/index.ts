@@ -83,6 +83,10 @@ export interface Clip {
   energy_score: number | null;
   title: string | null;
   hashtags: string[] | null;
+  title_options: string[] | null;
+  hashtag_options: string[][] | null;
+  copy_generation_status: string | null;
+  copy_generation_error: string | null;
   thumbnail_key: string | null;
   thumbnail_url: string | null;
   transcript_text: string | null;
@@ -99,6 +103,7 @@ export type ExportStatus = "queued" | "rendering" | "ready" | "error";
 export interface Export {
   id: string;
   clip_id: string;
+  retry_of_export_id: string | null;
   user_id: string;
   aspect_ratio: AspectRatio;
   caption_style: CaptionStyle | null;
@@ -112,6 +117,15 @@ export interface Export {
   error_message: string | null;
   render_time_sec: number | null;
   reused?: boolean;
+  video_id?: string | null;
+  video_title?: string | null;
+  clip_title?: string | null;
+  clip_transcript_text?: string | null;
+  clip_thumbnail_url?: string | null;
+  clip_title_options?: string[] | null;
+  clip_hashtag_options?: string[][] | null;
+  clip_copy_generation_status?: string | null;
+  clip_copy_generation_error?: string | null;
   created_at: string;
   updated_at: string;
 }

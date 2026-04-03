@@ -14,6 +14,7 @@ class ExportCreate(BaseModel):
 class ExportResponse(BaseModel):
     id: uuid.UUID
     clip_id: uuid.UUID
+    retry_of_export_id: uuid.UUID | None
     user_id: uuid.UUID
     aspect_ratio: AspectRatio
     caption_style: CaptionStyle | None
@@ -27,6 +28,15 @@ class ExportResponse(BaseModel):
     error_message: str | None
     render_time_sec: int | None
     reused: bool = False
+    video_id: uuid.UUID | None = None
+    video_title: str | None = None
+    clip_title: str | None = None
+    clip_transcript_text: str | None = None
+    clip_thumbnail_url: str | None = None
+    clip_title_options: list[str] | None = None
+    clip_hashtag_options: list[list[str]] | None = None
+    clip_copy_generation_status: str | None = None
+    clip_copy_generation_error: str | None = None
     created_at: datetime
     updated_at: datetime
 

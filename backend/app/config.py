@@ -37,6 +37,12 @@ class Settings(BaseSettings):
     # Anthropic
     anthropic_api_key: str = "placeholder"
 
+    # DeepSeek (OpenAI-compatible API)
+    deepseek_api_key: str = "placeholder"
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_model: str = "deepseek-chat"
+    deepseek_timeout_sec: int = 30
+
     # App
     environment: str = "development"
     log_level: str = "INFO"
