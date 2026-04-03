@@ -4,6 +4,12 @@ from pydantic import BaseModel
 from app.models.clip import ClipStatus
 
 
+class ClipUpdateRequest(BaseModel):
+    video_id: uuid.UUID
+    start_time: float
+    end_time: float
+
+
 class ClipResponse(BaseModel):
     id: uuid.UUID
     video_id: uuid.UUID

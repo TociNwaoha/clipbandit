@@ -25,6 +25,7 @@ export interface Video {
   source_type: VideoSourceType;
   source_url: string | null;
   storage_key: string | null;
+  source_download_url?: string | null;
   duration_sec: number | null;
   resolution: string | null;
   file_size_bytes: number | null;

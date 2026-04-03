@@ -255,7 +255,31 @@ async def get_video(
     video = result.scalar_one_or_none()
     if not video:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
-    return video
+
+    source_download_url: str | None = None
+    if video.storage_key:
+        try:
+            source_download_url = r2_client.get_presigned_download_url(video.storage_key)
+        except Exception as exc:
+            logger.warning("[videos] failed to generate source download URL for video_id=%s: %s", video.id, exc)
+
+    return VideoResponse(
+        id=video.id,
+        user_id=video.user_id,
+        title=video.title,
+        source_type=video.source_type,
+        source_url=video.source_url,
+        storage_key=video.storage_key,
+        source_download_url=source_download_url,
+        duration_sec=video.duration_sec,
+        resolution=video.resolution,
+        file_size_bytes=video.file_size_bytes,
+        status=video.status,
+        error_message=video.error_message,
+        clip_count=video.clip_count,
+        created_at=video.created_at,
+        updated_at=video.updated_at,
+    )
 
 
 @router.get("/videos/{video_id}/status", response_model=VideoStatusResponse)

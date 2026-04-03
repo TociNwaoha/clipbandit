@@ -11,6 +11,7 @@ class VideoResponse(BaseModel):
     source_type: VideoSourceType
     source_url: str | None
     storage_key: str | None
+    source_download_url: str | None = None
     duration_sec: int | None
     resolution: str | None
     file_size_bytes: int | None

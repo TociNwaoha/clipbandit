@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
@@ -158,6 +159,15 @@ export function VideoDetailPanel({ video, transcript, transcriptError, clips, cl
                     <p className="mt-3 line-clamp-3 text-sm text-slate-300">
                       {clip.transcript_text || "Transcript excerpt unavailable."}
                     </p>
+
+                    <div className="mt-4">
+                      <Link
+                        href={`/videos/${video.id}/clips/${clip.id}`}
+                        className="inline-flex items-center rounded-md bg-[#7C3AED] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[#6D28D9]"
+                      >
+                        Review & Export
+                      </Link>
+                    </div>
                   </div>
                 </div>
               </div>
