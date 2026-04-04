@@ -48,12 +48,13 @@ interface SelectionState {
 
 interface ExportsLibraryProps {
   initialExports: Export[];
+  initialError?: string | null;
 }
 
-export function ExportsLibrary({ initialExports }: ExportsLibraryProps) {
+export function ExportsLibrary({ initialExports, initialError = null }: ExportsLibraryProps) {
   const [exports, setExports] = useState<Export[]>(initialExports);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError);
   const [retryingExportId, setRetryingExportId] = useState<string | null>(null);
   const [copyMessageByExportId, setCopyMessageByExportId] = useState<Record<string, string>>({});
   const [selectionByExportId, setSelectionByExportId] = useState<Record<string, SelectionState>>({});
