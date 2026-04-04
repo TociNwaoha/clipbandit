@@ -129,11 +129,20 @@ def write_ass(
     output_path: str,
     caption_style: str | None,
     aspect_ratio: str,
+    target_width: int,
+    target_height: int,
+    caption_vertical_position: float | None = None,
 ) -> str:
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    layout = _caption_layout(aspect_ratio, caption_style)
+    layout = _caption_layout(
+        aspect_ratio=aspect_ratio,
+        caption_style=caption_style,
+        target_width=target_width,
+        target_height=target_height,
+        caption_vertical_position=caption_vertical_position,
+    )
     style_line = _ass_style_line(caption_style, layout)
 
     header = [
@@ -177,18 +186,27 @@ def render_video_clip(
     clip_start: float,
     clip_end: float,
     aspect_ratio: str,
+    target_width: int,
+    target_height: int,
     burned_ass_path: str | None = None,
 ) -> str:
     if clip_end <= clip_start:
         raise ValueError("Clip end time must be greater than start time")
 
-    target_width, target_height = _target_dimensions(aspect_ratio)
-    filter_chain = [
-        f"scale={target_width}:{target_height}:force_original_aspect_ratio=increase",
-        f"crop={target_width}:{target_height}",
-        "setsar=1",
-        "format=yuv420p",
-    ]
+    if aspect_ratio == "original":
+        filter_chain = [
+            f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease",
+            f"pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:black",
+            "setsar=1",
+            "format=yuv420p",
+        ]
+    else:
+        filter_chain = [
+            f"scale={target_width}:{target_height}:force_original_aspect_ratio=increase",
+            f"crop={target_width}:{target_height}",
+            "setsar=1",
+            "format=yuv420p",
+        ]
 
     if burned_ass_path:
         ass_filter_path = _escape_filter_path(burned_ass_path)
@@ -226,12 +244,23 @@ def render_video_clip(
     return output_path
 
 
-def _target_dimensions(aspect_ratio: str) -> tuple[int, int]:
+def resolve_output_dimensions(aspect_ratio: str, source_path: str) -> tuple[int, int]:
     normalized = (aspect_ratio or "").strip()
     if normalized == "1:1":
         return 720, 720
     if normalized == "9:16":
         return 720, 1280
+    if normalized == "16:9":
+        return 1280, 720
+    if normalized == "original":
+        source_width, source_height = _probe_video_dimensions(source_path)
+        if source_width <= 0 or source_height <= 0:
+            raise ValueError("Unable to resolve source dimensions for original aspect export")
+        max_dim = 1280
+        scale = min(1.0, max_dim / float(max(source_width, source_height)))
+        target_width = _ensure_even(int(round(source_width * scale)))
+        target_height = _ensure_even(int(round(source_height * scale)))
+        return max(2, target_width), max(2, target_height)
     raise ValueError(f"Unsupported aspect ratio: {aspect_ratio}")
 
 
@@ -262,41 +291,6 @@ def _format_ass_timestamp(seconds: float) -> str:
     secs = (total_cs % 6000) // 100
     centis = total_cs % 100
     return f"{hours}:{minutes:02}:{secs:02}.{centis:02}"
-
-
-def _caption_layout(aspect_ratio: str, caption_style: str | None) -> CaptionLayout:
-    width, height = _target_dimensions(aspect_ratio)
-    safe_width = min(width, height)
-
-    if aspect_ratio == "9:16":
-        base_font = max(26, int(round(safe_width * 0.048)))
-        margin_l = margin_r = max(62, int(round(width * 0.12)))
-        margin_v = max(120, int(round(height * 0.14)))
-        max_chars = 20
-    else:  # 1:1
-        base_font = max(30, int(round(safe_width * 0.056)))
-        margin_l = margin_r = max(56, int(round(width * 0.10)))
-        margin_v = max(86, int(round(height * 0.11)))
-        max_chars = 28
-
-    style = caption_style or "clean_minimal"
-    if style == "bold_boxed":
-        font_size = int(round(base_font * 1.02))
-    elif style == "sermon_quote":
-        font_size = int(round(base_font * 0.96))
-    else:
-        font_size = int(round(base_font * 0.92))
-
-    return CaptionLayout(
-        play_res_x=width,
-        play_res_y=height,
-        font_size=max(22, font_size),
-        margin_l=margin_l,
-        margin_r=margin_r,
-        margin_v=margin_v,
-        max_chars_per_line=max_chars,
-        max_lines=3,
-    )
 
 
 def _ass_style_line(caption_style: str | None, layout: CaptionLayout) -> str:
@@ -338,6 +332,64 @@ def _ass_style_line(caption_style: str | None, layout: CaptionLayout) -> str:
         f"{primary},{secondary},{outline_colour},{back_colour},"
         f"{bold},{italic},0,0,100,100,0,0,{border_style},{outline:.1f},{shadow},"
         f"2,{layout.margin_l},{layout.margin_r},{layout.margin_v},1"
+    )
+
+
+def _caption_layout(
+    aspect_ratio: str,
+    caption_style: str | None,
+    target_width: int,
+    target_height: int,
+    caption_vertical_position: float | None,
+) -> CaptionLayout:
+    if aspect_ratio == "9:16" or target_width < target_height:
+        profile = "vertical"
+    elif aspect_ratio == "1:1" or abs(target_width - target_height) <= 16:
+        profile = "square"
+    else:
+        profile = "landscape"
+
+    safe_width = min(target_width, target_height)
+
+    if profile == "vertical":
+        base_font = max(26, int(round(safe_width * 0.048)))
+        margin_l = margin_r = max(62, int(round(target_width * 0.12)))
+        default_margin_v = max(120, int(round(target_height * 0.14)))
+        max_chars = 20
+    elif profile == "square":
+        base_font = max(30, int(round(safe_width * 0.056)))
+        margin_l = margin_r = max(56, int(round(target_width * 0.10)))
+        default_margin_v = max(84, int(round(target_height * 0.11)))
+        max_chars = 28
+    else:
+        base_font = max(34, int(round(safe_width * 0.063)))
+        margin_l = margin_r = max(72, int(round(target_width * 0.08)))
+        default_margin_v = max(72, int(round(target_height * 0.11)))
+        max_chars = 34
+
+    style = caption_style or "clean_minimal"
+    if style == "bold_boxed":
+        font_size = int(round(base_font * 1.02))
+    elif style == "sermon_quote":
+        font_size = int(round(base_font * 0.96))
+    else:
+        font_size = int(round(base_font * 0.92))
+
+    if caption_vertical_position is not None:
+        position_pct = min(35.0, max(5.0, float(caption_vertical_position)))
+        margin_v = int(round(target_height * (position_pct / 100.0)))
+    else:
+        margin_v = default_margin_v
+
+    return CaptionLayout(
+        play_res_x=target_width,
+        play_res_y=target_height,
+        font_size=max(22, font_size),
+        margin_l=margin_l,
+        margin_r=margin_r,
+        margin_v=margin_v,
+        max_chars_per_line=max_chars,
+        max_lines=3,
     )
 
 
@@ -393,3 +445,33 @@ def _escape_filter_path(path: str) -> str:
         .replace("'", r"\'")
         .replace(",", r"\,")
     )
+
+
+def _probe_video_dimensions(media_path: str) -> tuple[int, int]:
+    cmd = [
+        "ffprobe",
+        "-v",
+        "quiet",
+        "-print_format",
+        "json",
+        "-show_streams",
+        "-select_streams",
+        "v:0",
+        media_path,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        raise RuntimeError(f"ffprobe failed while probing dimensions: {result.stderr}")
+    data = json.loads(result.stdout or "{}")
+    streams = data.get("streams", [])
+    if not streams:
+        return 0, 0
+    width = int(streams[0].get("width") or 0)
+    height = int(streams[0].get("height") or 0)
+    return width, height
+
+
+def _ensure_even(value: int) -> int:
+    if value % 2 == 0:
+        return value
+    return value - 1 if value > 1 else 2

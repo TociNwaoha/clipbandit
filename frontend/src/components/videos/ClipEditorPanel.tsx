@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 
 import { Card } from "@/components/ui/Card";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
@@ -65,7 +65,18 @@ function parseNumberInput(value: string): number | null {
   return parsed;
 }
 
+function parseResolutionAspectRatio(resolution: string | null | undefined): number | null {
+  if (!resolution) return null;
+  const match = resolution.trim().match(/^(\d+)\s*x\s*(\d+)$/i);
+  if (!match) return null;
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+  return width / height;
+}
+
 export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEditorPanelProps) {
+  const sourceAspectFromResolution = parseResolutionAspectRatio(video.resolution);
   const [clip, setClip] = useState<Clip>(initialClip);
   const [clipStart, setClipStart] = useState<string>(initialClip.start_time.toFixed(2));
   const [clipEnd, setClipEnd] = useState<string>(initialClip.end_time.toFixed(2));
@@ -73,9 +84,10 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  const [aspectRatio, setAspectRatio] = useState<AspectRatio>("9:16");
+  const [aspectRatio, setAspectRatio] = useState<AspectRatio>("original");
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle>("bold_boxed");
   const [captionFormat, setCaptionFormat] = useState<CaptionFormat>("burned_in");
+  const [captionVerticalPosition, setCaptionVerticalPosition] = useState<number>(15);
   const [exports, setExports] = useState<Export[]>(initialExports);
   const [exportsLoading, setExportsLoading] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -83,12 +95,16 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
   const [createExportMessage, setCreateExportMessage] = useState<string | null>(null);
 
   const [mediaDuration, setMediaDuration] = useState<number | null>(video.duration_sec ?? null);
+  const [sourceAspectRatio, setSourceAspectRatio] = useState<number | null>(sourceAspectFromResolution);
   const [playerCurrentTime, setPlayerCurrentTime] = useState<number>(0);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [isTimelineScrubbing, setIsTimelineScrubbing] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const timelineRef = useRef<HTMLDivElement | null>(null);
   const replayStopAtRef = useRef<number | null>(null);
   const replayActiveRef = useRef<boolean>(false);
+  const replayTokenRef = useRef<number>(0);
 
   const sourceUrl = video.source_download_url || null;
   const activeExportExists = exports.some((item) => ACTIVE_EXPORT_STATUSES.has(item.status));
@@ -146,12 +162,25 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
     };
   }, [normalizedMediaDuration, normalizedClipRange, playerCurrentTime]);
 
-  const previewAspectRatioValue = aspectRatio === "9:16" ? "9 / 16" : "1 / 1";
-  const previewMaxWidthClass = aspectRatio === "9:16" ? "max-w-[360px]" : "max-w-[480px]";
+  const effectiveSourceAspectRatio = sourceAspectRatio ?? sourceAspectFromResolution ?? 16 / 9;
+
+  const previewAspectRatioValue = useMemo(() => {
+    if (aspectRatio === "9:16") return "9 / 16";
+    if (aspectRatio === "16:9") return "16 / 9";
+    if (aspectRatio === "1:1") return "1 / 1";
+    return `${effectiveSourceAspectRatio}`;
+  }, [aspectRatio, effectiveSourceAspectRatio]);
+
+  const previewMaxWidthClass = useMemo(() => {
+    const ratio = aspectRatio === "original" ? effectiveSourceAspectRatio : aspectRatio === "9:16" ? 9 / 16 : aspectRatio === "16:9" ? 16 / 9 : 1;
+    if (ratio <= 0.8) return "max-w-[360px]";
+    if (ratio >= 1.45) return "max-w-[760px]";
+    return "max-w-[520px]";
+  }, [aspectRatio, effectiveSourceAspectRatio]);
 
   const captionPreviewLayout = useMemo(
-    () => getCaptionPreviewLayout(captionStyle, aspectRatio),
-    [captionStyle, aspectRatio]
+    () => getCaptionPreviewLayout(captionStyle, aspectRatio, effectiveSourceAspectRatio),
+    [captionStyle, aspectRatio, effectiveSourceAspectRatio]
   );
   const captionPreviewTheme = useMemo(() => getCaptionStyleTheme(captionStyle), [captionStyle]);
   const captionPreviewText = useMemo(
@@ -167,6 +196,10 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
       ),
     [captionPreviewLayout.maxCharsPerLine, captionPreviewLayout.maxLines, captionPreviewText]
   );
+
+  useEffect(() => {
+    setCaptionVerticalPosition(captionPreviewLayout.marginBottomPercent);
+  }, [captionPreviewLayout.marginBottomPercent]);
 
   const refreshExports = async () => {
     setExportsLoading(true);
@@ -190,20 +223,91 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
     return () => clearInterval(timer);
   }, [activeExportExists, clip.id]);
 
+  const clearClipPlaybackMode = useCallback(() => {
+    replayActiveRef.current = false;
+    replayStopAtRef.current = null;
+  }, []);
+
+  const seekPlayerToTime = useCallback(
+    async (nextTime: number) => {
+      const player = videoRef.current;
+      if (!player || !normalizedMediaDuration) return;
+      const clamped = Math.min(Math.max(nextTime, 0), normalizedMediaDuration);
+      if (Math.abs(player.currentTime - clamped) < 0.03) {
+        setPlayerCurrentTime(clamped);
+        return;
+      }
+
+      await new Promise<void>((resolve) => {
+        let resolved = false;
+        const done = () => {
+          if (resolved) return;
+          resolved = true;
+          player.removeEventListener("seeked", done);
+          resolve();
+        };
+        player.addEventListener("seeked", done, { once: true });
+        player.currentTime = clamped;
+        window.setTimeout(done, 250);
+      });
+      setPlayerCurrentTime(clamped);
+    },
+    [normalizedMediaDuration]
+  );
+
+  const seekByTimelinePosition = useCallback(
+    (clientX: number) => {
+      const player = videoRef.current;
+      const timeline = timelineRef.current;
+      if (!player || !timeline || !normalizedMediaDuration) return;
+
+      const rect = timeline.getBoundingClientRect();
+      if (rect.width <= 0) return;
+      const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+      const nextTime = ratio * normalizedMediaDuration;
+      clearClipPlaybackMode();
+      player.currentTime = nextTime;
+      setPlayerCurrentTime(nextTime);
+    },
+    [clearClipPlaybackMode, normalizedMediaDuration]
+  );
+
+  const handleTimelinePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    setIsTimelineScrubbing(true);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    seekByTimelinePosition(event.clientX);
+  };
+
+  const handleTimelinePointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    if (!isTimelineScrubbing) return;
+    seekByTimelinePosition(event.clientX);
+  };
+
+  const handleTimelinePointerUp = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    setIsTimelineScrubbing(false);
+  };
+
   const handleReplay = async () => {
     const player = videoRef.current;
     if (!player) return;
-
     if (!normalizedClipRange) return;
+
+    const replayToken = replayTokenRef.current + 1;
+    replayTokenRef.current = replayToken;
+
+    clearClipPlaybackMode();
     player.pause();
-    player.currentTime = normalizedClipRange.start;
-    setPlayerCurrentTime(normalizedClipRange.start);
+    await seekPlayerToTime(normalizedClipRange.start);
+    if (replayTokenRef.current !== replayToken) return;
+
     replayStopAtRef.current = normalizedClipRange.end;
     replayActiveRef.current = true;
 
     await player.play().catch(() => {
-      replayActiveRef.current = false;
-      replayStopAtRef.current = null;
+      clearClipPlaybackMode();
     });
   };
 
@@ -211,8 +315,8 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
     const player = videoRef.current;
     if (!player) return;
     if (!normalizedClipRange) return;
-    player.currentTime = normalizedClipRange.start;
-    setPlayerCurrentTime(normalizedClipRange.start);
+    clearClipPlaybackMode();
+    void seekPlayerToTime(normalizedClipRange.start);
   };
 
   const handleTimeUpdate = () => {
@@ -227,8 +331,7 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
       player.pause();
       player.currentTime = stopAt;
       setPlayerCurrentTime(stopAt);
-      replayActiveRef.current = false;
-      replayStopAtRef.current = null;
+      clearClipPlaybackMode();
     }
   };
 
@@ -241,8 +344,7 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
       player.pause();
       player.currentTime = stopAt;
       setPlayerCurrentTime(stopAt);
-      replayActiveRef.current = false;
-      replayStopAtRef.current = null;
+      clearClipPlaybackMode();
     }
   };
 
@@ -299,6 +401,7 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
         aspect_ratio: aspectRatio,
         caption_style: captionStyle,
         caption_format: captionFormat,
+        caption_vertical_position: captionVerticalPosition,
       });
       setExports((prev) => {
         const existingIndex = prev.findIndex((item) => item.id === created.id);
@@ -371,6 +474,11 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
                   if (Number.isFinite(duration) && duration > 0) {
                     setMediaDuration(duration);
                   }
+                  const width = event.currentTarget.videoWidth;
+                  const height = event.currentTarget.videoHeight;
+                  if (width > 0 && height > 0) {
+                    setSourceAspectRatio(width / height);
+                  }
                   setPlayerCurrentTime(event.currentTarget.currentTime || 0);
                 }}
                 onError={() => setPreviewError("Preview failed to load source video.")}
@@ -389,7 +497,7 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
                 style={{
                   paddingLeft: `${captionPreviewLayout.marginXPercent}%`,
                   paddingRight: `${captionPreviewLayout.marginXPercent}%`,
-                  paddingBottom: `${captionPreviewLayout.marginBottomPercent}%`,
+                  paddingBottom: `${captionVerticalPosition}%`,
                 }}
               >
                 <div
@@ -434,7 +542,14 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
 
             {timelineMetrics ? (
               <>
-                <div className="relative mt-3 h-5">
+                <div
+                  ref={timelineRef}
+                  className={`relative mt-3 h-5 touch-none cursor-pointer ${isTimelineScrubbing ? "opacity-95" : ""}`}
+                  onPointerDown={handleTimelinePointerDown}
+                  onPointerMove={handleTimelinePointerMove}
+                  onPointerUp={handleTimelinePointerUp}
+                  onPointerCancel={handleTimelinePointerUp}
+                >
                   <div className="absolute inset-x-0 top-1/2 h-2 -translate-y-1/2 rounded-full bg-slate-800" />
                   <div
                     className="absolute top-1/2 h-2 -translate-y-1/2 rounded-full border border-[#A78BFA] bg-[#7C3AED]/45"
@@ -580,6 +695,19 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
         <h3 className="text-sm font-semibold text-white">Export Settings</h3>
         <div className="mt-4 grid gap-4 md:grid-cols-3">
           <label className="text-xs text-slate-400">
+            Preview / Export Aspect
+            <select
+              value={aspectRatio}
+              onChange={(event) => setAspectRatio(event.target.value as AspectRatio)}
+              className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white focus:border-[#7C3AED] focus:outline-none"
+            >
+              <option value="original">original</option>
+              <option value="9:16">9:16</option>
+              <option value="16:9">16:9</option>
+              <option value="1:1">1:1</option>
+            </select>
+          </label>
+          <label className="text-xs text-slate-400">
             Caption Style
             <select
               value={captionStyle}
@@ -592,17 +720,6 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
             </select>
           </label>
           <label className="text-xs text-slate-400">
-            Aspect Ratio
-            <select
-              value={aspectRatio}
-              onChange={(event) => setAspectRatio(event.target.value as AspectRatio)}
-              className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white focus:border-[#7C3AED] focus:outline-none"
-            >
-              <option value="9:16">9:16</option>
-              <option value="1:1">1:1</option>
-            </select>
-          </label>
-          <label className="text-xs text-slate-400">
             Caption Format
             <select
               value={captionFormat}
@@ -612,6 +729,24 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
               <option value="burned_in">burned_in</option>
               <option value="srt">srt</option>
             </select>
+          </label>
+          <label className="text-xs text-slate-400 md:col-span-3">
+            Caption Vertical Position
+            <div className="mt-1 flex items-center gap-3">
+              <input
+                type="range"
+                min={5}
+                max={35}
+                step={1}
+                value={captionVerticalPosition}
+                onChange={(event) => setCaptionVerticalPosition(Number(event.target.value))}
+                className="w-full accent-[#7C3AED]"
+              />
+              <span className="min-w-10 text-right text-sm text-slate-200">{captionVerticalPosition}%</span>
+            </div>
+            <p className="mt-1 text-[11px] text-slate-500">
+              Lower values place captions closer to the bottom edge. Export uses this position.
+            </p>
           </label>
         </div>
 

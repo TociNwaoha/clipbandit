@@ -26,6 +26,12 @@ def _enum_value(value):
     return value.value if hasattr(value, "value") else value
 
 
+def _normalize_caption_vertical_position(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return round(min(35.0, max(5.0, float(value))), 2)
+
+
 def _derived_download_url(storage_key: str | None) -> str | None:
     if not storage_key:
         return None
@@ -68,6 +74,7 @@ def _to_response(
         aspect_ratio=export.aspect_ratio,
         caption_style=export.caption_style,
         caption_format=export.caption_format,
+        caption_vertical_position=export.caption_vertical_position,
         storage_key=export.storage_key,
         srt_key=export.srt_key,
         download_url=download_url,
@@ -182,13 +189,15 @@ async def create_export(
     current_user: User = Depends(get_current_user),
 ):
     logger.info(
-        "[exports] create requested user_id=%s clip_id=%s aspect_ratio=%s caption_style=%s caption_format=%s",
+        "[exports] create requested user_id=%s clip_id=%s aspect_ratio=%s caption_style=%s caption_format=%s caption_vertical_position=%s",
         current_user.id,
         body.clip_id,
         body.aspect_ratio,
         body.caption_style,
         body.caption_format,
+        body.caption_vertical_position,
     )
+    caption_vertical_position = _normalize_caption_vertical_position(body.caption_vertical_position)
 
     clip_video_result = await db.execute(
         select(Clip, Video)
@@ -200,7 +209,7 @@ async def create_export(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clip not found")
     clip, video = clip_video_row
 
-    dedupe_result = await db.execute(
+    dedupe_query = (
         select(Export)
         .where(
             Export.user_id == current_user.id,
@@ -212,6 +221,12 @@ async def create_export(
         )
         .order_by(Export.created_at.desc())
     )
+    if caption_vertical_position is None:
+        dedupe_query = dedupe_query.where(Export.caption_vertical_position.is_(None))
+    else:
+        dedupe_query = dedupe_query.where(Export.caption_vertical_position == caption_vertical_position)
+
+    dedupe_result = await db.execute(dedupe_query)
     existing = dedupe_result.scalars().first()
     if existing:
         logger.info(
@@ -230,6 +245,7 @@ async def create_export(
         aspect_ratio=body.aspect_ratio,
         caption_style=body.caption_style,
         caption_format=body.caption_format,
+        caption_vertical_position=caption_vertical_position,
     )
     db.add(export)
     await db.flush()
@@ -244,6 +260,7 @@ async def create_export(
             "aspect_ratio": _enum_value(body.aspect_ratio),
             "caption_style": _enum_value(body.caption_style) if body.caption_style else None,
             "caption_format": _enum_value(body.caption_format),
+            "caption_vertical_position": caption_vertical_position,
         },
     )
 
@@ -283,6 +300,7 @@ async def retry_export(
         aspect_ratio=original_export.aspect_ratio,
         caption_style=original_export.caption_style,
         caption_format=original_export.caption_format,
+        caption_vertical_position=original_export.caption_vertical_position,
     )
     db.add(retry_export_row)
     await db.flush()
@@ -297,6 +315,7 @@ async def retry_export(
             "aspect_ratio": _enum_value(retry_export_row.aspect_ratio),
             "caption_style": _enum_value(retry_export_row.caption_style) if retry_export_row.caption_style else None,
             "caption_format": _enum_value(retry_export_row.caption_format),
+            "caption_vertical_position": retry_export_row.caption_vertical_position,
             "retry_of_export_id": str(original_export.id),
         },
     )

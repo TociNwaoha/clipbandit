@@ -19,6 +19,7 @@ from app.services.rendering import (
     build_subtitle_cues,
     has_video_stream,
     render_video_clip,
+    resolve_output_dimensions,
     write_ass,
     write_srt,
 )
@@ -107,6 +108,8 @@ def render_export(self, export_id: str, job_id: str | None = None):
 
             if not has_video_stream(str(source_path)):
                 raise RenderPipelineError("Source media is audio-only and cannot be exported as video")
+            aspect_ratio_value = _enum_value(export.aspect_ratio)
+            target_width, target_height = resolve_output_dimensions(aspect_ratio_value, str(source_path))
 
             transcript_rows = (
                 db.execute(
@@ -144,7 +147,10 @@ def render_export(self, export_id: str, job_id: str | None = None):
                     cues,
                     str(ass_local_path),
                     _enum_value(export.caption_style),
-                    _enum_value(export.aspect_ratio),
+                    aspect_ratio_value,
+                    target_width,
+                    target_height,
+                    export.caption_vertical_position,
                 )
             logger.info("[render] caption generation end export_id=%s cues=%s", export.id, len(cues))
 
@@ -160,7 +166,9 @@ def render_export(self, export_id: str, job_id: str | None = None):
                 output_path=str(output_path),
                 clip_start=float(clip.start_time),
                 clip_end=float(clip.end_time),
-                aspect_ratio=_enum_value(export.aspect_ratio),
+                aspect_ratio=aspect_ratio_value,
+                target_width=target_width,
+                target_height=target_height,
                 burned_ass_path=str(ass_local_path) if ass_local_path else None,
             )
             logger.info("[render] ffmpeg render end export_id=%s output=%s", export.id, output_path)

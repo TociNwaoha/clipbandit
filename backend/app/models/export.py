@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Integer, Text, DateTime, ForeignKey, Enum as SAEnum
+from sqlalchemy import Integer, Text, DateTime, ForeignKey, Enum as SAEnum, Float
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 from app.database import Base
@@ -8,7 +8,9 @@ import enum
 
 
 class AspectRatio(str, enum.Enum):
+    original = "original"
     vertical = "9:16"
+    landscape = "16:9"
     square = "1:1"
 
 
@@ -57,6 +59,7 @@ class Export(Base):
     caption_format: Mapped[CaptionFormat] = mapped_column(
         SAEnum(CaptionFormat, name="caption_format"), nullable=False
     )
+    caption_vertical_position: Mapped[float | None] = mapped_column(Float)
     storage_key: Mapped[str | None] = mapped_column(Text)
     srt_key: Mapped[str | None] = mapped_column(Text)
     download_url: Mapped[str | None] = mapped_column(Text)

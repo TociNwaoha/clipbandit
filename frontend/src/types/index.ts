@@ -95,7 +95,7 @@ export interface Clip {
   updated_at: string;
 }
 
-export type AspectRatio = "9:16" | "1:1";
+export type AspectRatio = "original" | "9:16" | "16:9" | "1:1";
 export type CaptionStyle = "bold_boxed" | "sermon_quote" | "clean_minimal";
 export type CaptionFormat = "burned_in" | "srt";
 export type ExportStatus = "queued" | "rendering" | "ready" | "error";
@@ -108,6 +108,7 @@ export interface Export {
   aspect_ratio: AspectRatio;
   caption_style: CaptionStyle | null;
   caption_format: CaptionFormat;
+  caption_vertical_position?: number | null;
   storage_key: string | null;
   srt_key: string | null;
   download_url: string | null;

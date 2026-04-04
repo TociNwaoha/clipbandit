@@ -43,9 +43,19 @@ const STYLE_THEMES: Record<CaptionStyle, CaptionStyleTheme> = {
 
 export function getCaptionPreviewLayout(
   captionStyle: CaptionStyle,
-  aspectRatio: AspectRatio
+  aspectRatio: AspectRatio,
+  sourceAspectRatio?: number | null
 ): CaptionPreviewLayout {
-  if (aspectRatio === "9:16") {
+  const effectiveAspect =
+    aspectRatio === "original"
+      ? sourceAspectRatio && sourceAspectRatio < 0.92
+        ? "9:16"
+        : sourceAspectRatio && sourceAspectRatio > 1.08
+          ? "16:9"
+          : "1:1"
+      : aspectRatio;
+
+  if (effectiveAspect === "9:16") {
     return {
       fontSizePx:
         captionStyle === "bold_boxed"
@@ -57,6 +67,22 @@ export function getCaptionPreviewLayout(
       marginXPercent: 12,
       marginBottomPercent: 15,
       maxCharsPerLine: 20,
+      maxLines: 3,
+    };
+  }
+
+  if (effectiveAspect === "16:9") {
+    return {
+      fontSizePx:
+        captionStyle === "bold_boxed"
+          ? 32
+          : captionStyle === "sermon_quote"
+            ? 30
+            : 29,
+      lineHeight: 1.2,
+      marginXPercent: 8,
+      marginBottomPercent: 11,
+      maxCharsPerLine: 34,
       maxLines: 3,
     };
   }

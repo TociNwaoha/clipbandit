@@ -9,6 +9,7 @@ class ExportCreate(BaseModel):
     aspect_ratio: AspectRatio
     caption_style: CaptionStyle | None = None
     caption_format: CaptionFormat
+    caption_vertical_position: float | None = None
 
 
 class ExportResponse(BaseModel):
@@ -19,6 +20,7 @@ class ExportResponse(BaseModel):
     aspect_ratio: AspectRatio
     caption_style: CaptionStyle | None
     caption_format: CaptionFormat
+    caption_vertical_position: float | None = None
     storage_key: str | None
     srt_key: str | None
     download_url: str | None
