@@ -18,6 +18,18 @@ class SubtitleCue:
     text: str
 
 
+@dataclass(frozen=True)
+class CaptionLayout:
+    play_res_x: int
+    play_res_y: int
+    font_size: int
+    margin_l: int
+    margin_r: int
+    margin_v: int
+    max_chars_per_line: int
+    max_lines: int = 3
+
+
 def has_video_stream(media_path: str) -> bool:
     cmd = [
         "ffprobe",
@@ -112,19 +124,25 @@ def write_srt(cues: list[SubtitleCue], output_path: str) -> str:
     return output_path
 
 
-def write_ass(cues: list[SubtitleCue], output_path: str, caption_style: str | None) -> str:
+def write_ass(
+    cues: list[SubtitleCue],
+    output_path: str,
+    caption_style: str | None,
+    aspect_ratio: str,
+) -> str:
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    style_line = _ass_style_line(caption_style)
+    layout = _caption_layout(aspect_ratio, caption_style)
+    style_line = _ass_style_line(caption_style, layout)
 
     header = [
         "[Script Info]",
         "ScriptType: v4.00+",
         "WrapStyle: 2",
         "ScaledBorderAndShadow: yes",
-        "PlayResX: 1280",
-        "PlayResY: 720",
+        f"PlayResX: {layout.play_res_x}",
+        f"PlayResY: {layout.play_res_y}",
         "",
         "[V4+ Styles]",
         "Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,"
@@ -138,9 +156,14 @@ def write_ass(cues: list[SubtitleCue], output_path: str, caption_style: str | No
 
     events = []
     for cue in cues:
+        wrapped = _wrap_caption_text(
+            cue.text,
+            max_chars_per_line=layout.max_chars_per_line,
+            max_lines=layout.max_lines,
+        )
         events.append(
             f"Dialogue: 0,{_format_ass_timestamp(cue.start)},{_format_ass_timestamp(cue.end)},"
-            f"Default,,0,0,0,,{_escape_ass_text(cue.text)}"
+            f"Default,,0,0,0,,{_escape_ass_text(wrapped)}"
         )
 
     path.write_text("\n".join(header + events) + "\n", encoding="utf-8")
@@ -241,22 +264,81 @@ def _format_ass_timestamp(seconds: float) -> str:
     return f"{hours}:{minutes:02}:{secs:02}.{centis:02}"
 
 
-def _ass_style_line(caption_style: str | None) -> str:
-    styles = {
-        "bold_boxed": (
-            "Style: Default,Arial,56,&H00FFFFFF,&H000000FF,&H00101010,&H7F000000,"
-            "-1,0,0,0,100,100,0,0,3,1,0,2,60,60,90,1"
-        ),
-        "sermon_quote": (
-            "Style: Default,Arial,50,&H00FFFFFF,&H000000FF,&H00151515,&H64000000,"
-            "0,1,0,0,100,100,0,0,1,3,0,2,80,80,120,1"
-        ),
-        "clean_minimal": (
-            "Style: Default,Arial,46,&H00FFFFFF,&H000000FF,&H00101010,&H4A000000,"
-            "0,0,0,0,100,100,0,0,1,2,0,2,70,70,95,1"
-        ),
-    }
-    return styles.get(caption_style or "clean_minimal", styles["clean_minimal"])
+def _caption_layout(aspect_ratio: str, caption_style: str | None) -> CaptionLayout:
+    width, height = _target_dimensions(aspect_ratio)
+    safe_width = min(width, height)
+
+    if aspect_ratio == "9:16":
+        base_font = max(26, int(round(safe_width * 0.048)))
+        margin_l = margin_r = max(62, int(round(width * 0.12)))
+        margin_v = max(120, int(round(height * 0.14)))
+        max_chars = 20
+    else:  # 1:1
+        base_font = max(30, int(round(safe_width * 0.056)))
+        margin_l = margin_r = max(56, int(round(width * 0.10)))
+        margin_v = max(86, int(round(height * 0.11)))
+        max_chars = 28
+
+    style = caption_style or "clean_minimal"
+    if style == "bold_boxed":
+        font_size = int(round(base_font * 1.02))
+    elif style == "sermon_quote":
+        font_size = int(round(base_font * 0.96))
+    else:
+        font_size = int(round(base_font * 0.92))
+
+    return CaptionLayout(
+        play_res_x=width,
+        play_res_y=height,
+        font_size=max(22, font_size),
+        margin_l=margin_l,
+        margin_r=margin_r,
+        margin_v=margin_v,
+        max_chars_per_line=max_chars,
+        max_lines=3,
+    )
+
+
+def _ass_style_line(caption_style: str | None, layout: CaptionLayout) -> str:
+    style = caption_style or "clean_minimal"
+    if style == "bold_boxed":
+        primary = "&H00FFFFFF"
+        secondary = "&H000000FF"
+        outline_colour = "&H00141414"
+        back_colour = "&H96000000"
+        bold = -1
+        italic = 0
+        border_style = 3
+        outline = 1.0
+        shadow = 0
+    elif style == "sermon_quote":
+        primary = "&H00F5F5F5"
+        secondary = "&H000000FF"
+        outline_colour = "&H00202020"
+        back_colour = "&H5A000000"
+        bold = 0
+        italic = 1
+        border_style = 1
+        outline = 2.2
+        shadow = 0
+    else:
+        primary = "&H00FFFFFF"
+        secondary = "&H000000FF"
+        outline_colour = "&H00141414"
+        back_colour = "&H46000000"
+        bold = 0
+        italic = 0
+        border_style = 1
+        outline = 1.8
+        shadow = 0
+
+    return (
+        "Style: Default,Arial,"
+        f"{layout.font_size},"
+        f"{primary},{secondary},{outline_colour},{back_colour},"
+        f"{bold},{italic},0,0,100,100,0,0,{border_style},{outline:.1f},{shadow},"
+        f"2,{layout.margin_l},{layout.margin_r},{layout.margin_v},1"
+    )
 
 
 def _escape_ass_text(text: str) -> str:
@@ -265,6 +347,43 @@ def _escape_ass_text(text: str) -> str:
         .replace("{", r"\{")
         .replace("}", r"\}")
     )
+
+
+def _wrap_caption_text(text: str, max_chars_per_line: int, max_lines: int) -> str:
+    words = [part for part in re.split(r"\s+", text.strip()) if part]
+    if not words:
+        return ""
+
+    lines: list[str] = []
+    current: list[str] = []
+    current_len = 0
+
+    for word in words:
+        projected_len = len(word) if not current else current_len + 1 + len(word)
+        if current and projected_len > max_chars_per_line:
+            lines.append(" ".join(current))
+            current = [word]
+            current_len = len(word)
+            if len(lines) >= max_lines:
+                break
+        else:
+            current.append(word)
+            current_len = projected_len
+
+    if len(lines) < max_lines and current:
+        lines.append(" ".join(current))
+
+    if not lines:
+        return ""
+
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+
+    consumed_words = sum(len(line.split()) for line in lines)
+    if consumed_words < len(words):
+        lines[-1] = lines[-1].rstrip(" .,:;!?") + "..."
+
+    return r"\N".join(lines)
 
 
 def _escape_filter_path(path: str) -> str:

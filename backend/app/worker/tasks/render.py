@@ -140,7 +140,12 @@ def render_export(self, export_id: str, job_id: str | None = None):
             ass_local_path: Path | None = None
             if export.caption_format == CaptionFormat.burned_in:
                 ass_local_path = tmp_dir / "captions.ass"
-                write_ass(cues, str(ass_local_path), _enum_value(export.caption_style))
+                write_ass(
+                    cues,
+                    str(ass_local_path),
+                    _enum_value(export.caption_style),
+                    _enum_value(export.aspect_ratio),
+                )
             logger.info("[render] caption generation end export_id=%s cues=%s", export.id, len(cues))
 
             output_path = tmp_dir / "output.mp4"

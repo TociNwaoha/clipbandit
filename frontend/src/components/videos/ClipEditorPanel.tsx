@@ -6,6 +6,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { api, ApiError } from "@/lib/api";
+import {
+  buildCaptionPreviewText,
+  getCaptionPreviewLayout,
+  getCaptionStyleTheme,
+  wrapCaptionPreviewText,
+} from "@/lib/captionPreview";
 import { AspectRatio, CaptionFormat, CaptionStyle, Clip, Export, Video } from "@/types";
 
 interface ClipEditorPanelProps {
@@ -28,6 +34,19 @@ function formatTimeBoundary(seconds: number): string {
   const mins = Math.floor(safe / 60);
   const secs = safe % 60;
   return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
+
+function formatClockTime(seconds: number | null | undefined): string {
+  const safeValue = Number(seconds || 0);
+  if (!Number.isFinite(safeValue) || safeValue <= 0) return "0:00";
+  const whole = Math.floor(safeValue);
+  const hours = Math.floor(whole / 3600);
+  const minutes = Math.floor((whole % 3600) / 60);
+  const secs = whole % 60;
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  }
+  return `${minutes}:${secs.toString().padStart(2, "0")}`;
 }
 
 function formatSeconds(seconds: number | null | undefined): string {
@@ -64,10 +83,12 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
   const [createExportMessage, setCreateExportMessage] = useState<string | null>(null);
 
   const [mediaDuration, setMediaDuration] = useState<number | null>(video.duration_sec ?? null);
+  const [playerCurrentTime, setPlayerCurrentTime] = useState<number>(0);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const replayStopAtRef = useRef<number | null>(null);
+  const replayActiveRef = useRef<boolean>(false);
 
   const sourceUrl = video.source_download_url || null;
   const activeExportExists = exports.some((item) => ACTIVE_EXPORT_STATUSES.has(item.status));
@@ -80,6 +101,72 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
     if (duration <= 0) return null;
     return duration;
   }, [clipStart, clipEnd]);
+
+  const normalizedMediaDuration = useMemo(() => {
+    const duration = Number(mediaDuration ?? video.duration_sec ?? 0);
+    if (!Number.isFinite(duration) || duration <= 0) return null;
+    return duration;
+  }, [mediaDuration, video.duration_sec]);
+
+  const normalizedClipRange = useMemo(() => {
+    const start = parseNumberInput(clipStart);
+    const end = parseNumberInput(clipEnd);
+    if (start === null || end === null) return null;
+
+    let safeStart = Math.max(0, start);
+    let safeEnd = Math.max(0, end);
+    if (normalizedMediaDuration) {
+      safeStart = Math.min(safeStart, normalizedMediaDuration);
+      safeEnd = Math.min(safeEnd, normalizedMediaDuration);
+    }
+    if (safeEnd <= safeStart) return null;
+
+    return {
+      start: safeStart,
+      end: safeEnd,
+      duration: safeEnd - safeStart,
+    };
+  }, [clipStart, clipEnd, normalizedMediaDuration]);
+
+  const timelineMetrics = useMemo(() => {
+    if (!normalizedMediaDuration || !normalizedClipRange) return null;
+    const toPercent = (value: number) =>
+      Math.min(100, Math.max(0, (value / normalizedMediaDuration) * 100));
+
+    const clipStartPercent = toPercent(normalizedClipRange.start);
+    const clipEndPercent = toPercent(normalizedClipRange.end);
+    const clipWidthPercent = Math.max(0, clipEndPercent - clipStartPercent);
+    const playheadPercent = toPercent(playerCurrentTime);
+
+    return {
+      clipStartPercent,
+      clipEndPercent,
+      clipWidthPercent,
+      playheadPercent,
+    };
+  }, [normalizedMediaDuration, normalizedClipRange, playerCurrentTime]);
+
+  const previewAspectRatioValue = aspectRatio === "9:16" ? "9 / 16" : "1 / 1";
+  const previewMaxWidthClass = aspectRatio === "9:16" ? "max-w-[360px]" : "max-w-[480px]";
+
+  const captionPreviewLayout = useMemo(
+    () => getCaptionPreviewLayout(captionStyle, aspectRatio),
+    [captionStyle, aspectRatio]
+  );
+  const captionPreviewTheme = useMemo(() => getCaptionStyleTheme(captionStyle), [captionStyle]);
+  const captionPreviewText = useMemo(
+    () => buildCaptionPreviewText(clip.transcript_text),
+    [clip.transcript_text]
+  );
+  const captionPreviewLines = useMemo(
+    () =>
+      wrapCaptionPreviewText(
+        captionPreviewText,
+        captionPreviewLayout.maxCharsPerLine,
+        captionPreviewLayout.maxLines
+      ),
+    [captionPreviewLayout.maxCharsPerLine, captionPreviewLayout.maxLines, captionPreviewText]
+  );
 
   const refreshExports = async () => {
     setExportsLoading(true);
@@ -107,32 +194,54 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
     const player = videoRef.current;
     if (!player) return;
 
-    const start = parseNumberInput(clipStart);
-    const end = parseNumberInput(clipEnd);
-    if (start === null || end === null || end <= start) return;
+    if (!normalizedClipRange) return;
+    player.pause();
+    player.currentTime = normalizedClipRange.start;
+    setPlayerCurrentTime(normalizedClipRange.start);
+    replayStopAtRef.current = normalizedClipRange.end;
+    replayActiveRef.current = true;
 
-    replayStopAtRef.current = end;
-    player.currentTime = start;
-    await player.play().catch(() => undefined);
+    await player.play().catch(() => {
+      replayActiveRef.current = false;
+      replayStopAtRef.current = null;
+    });
   };
 
   const handleSeekStart = () => {
     const player = videoRef.current;
     if (!player) return;
-    const start = parseNumberInput(clipStart);
-    if (start === null) return;
-    player.currentTime = Math.max(start, 0);
+    if (!normalizedClipRange) return;
+    player.currentTime = normalizedClipRange.start;
+    setPlayerCurrentTime(normalizedClipRange.start);
   };
 
   const handleTimeUpdate = () => {
     const player = videoRef.current;
     if (!player) return;
+    setPlayerCurrentTime(player.currentTime);
+
+    if (!replayActiveRef.current) return;
     const stopAt = replayStopAtRef.current;
     if (stopAt === null) return;
-    if (player.currentTime >= stopAt) {
+    if (player.currentTime >= stopAt - 0.03) {
       player.pause();
-      const start = parseNumberInput(clipStart);
-      if (start !== null) player.currentTime = Math.max(start, 0);
+      player.currentTime = stopAt;
+      setPlayerCurrentTime(stopAt);
+      replayActiveRef.current = false;
+      replayStopAtRef.current = null;
+    }
+  };
+
+  const handleSeeked = () => {
+    const player = videoRef.current;
+    if (!player) return;
+    setPlayerCurrentTime(player.currentTime);
+    const stopAt = replayStopAtRef.current;
+    if (replayActiveRef.current && stopAt !== null && player.currentTime > stopAt) {
+      player.pause();
+      player.currentTime = stopAt;
+      setPlayerCurrentTime(stopAt);
+      replayActiveRef.current = false;
       replayStopAtRef.current = null;
     }
   };
@@ -238,31 +347,149 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
         <Card>
           <h3 className="text-sm font-semibold text-white">Preview</h3>
           <p className="mt-1 text-xs text-slate-400">
-            Source preview with current clip boundaries. Replay starts from the selected start time.
+            Source preview with current clip boundaries and caption style preview for selected export settings.
           </p>
-          <div className="mt-4 overflow-hidden rounded-lg border border-slate-700 bg-black">
+          <div className={`relative mx-auto mt-4 w-full ${previewMaxWidthClass}`}>
+            <div className="mb-2 flex items-center justify-between text-xs text-slate-400">
+              <span>Preview Frame</span>
+              <span>
+                {aspectRatio} • {captionStyle} • {captionFormat}
+              </span>
+            </div>
+            <div
+              className="relative overflow-hidden rounded-lg border border-slate-700 bg-black"
+              style={{ aspectRatio: previewAspectRatioValue }}
+            >
             {sourceUrl ? (
               <video
                 ref={videoRef}
                 controls
                 src={sourceUrl}
-                className="h-[320px] w-full bg-black object-contain"
+                className="h-full w-full bg-black object-cover"
                 onLoadedMetadata={(event) => {
                   const duration = event.currentTarget.duration;
                   if (Number.isFinite(duration) && duration > 0) {
                     setMediaDuration(duration);
                   }
+                  setPlayerCurrentTime(event.currentTarget.currentTime || 0);
                 }}
                 onError={() => setPreviewError("Preview failed to load source video.")}
                 onTimeUpdate={handleTimeUpdate}
+                onSeeked={handleSeeked}
               />
             ) : (
-              <div className="flex h-[320px] items-center justify-center text-sm text-slate-400">
+              <div className="flex h-full items-center justify-center text-sm text-slate-400">
                 Source preview URL is unavailable for this video.
               </div>
             )}
+
+            <div className="pointer-events-none absolute inset-0 z-20 flex items-end justify-center">
+              <div
+                className="w-full"
+                style={{
+                  paddingLeft: `${captionPreviewLayout.marginXPercent}%`,
+                  paddingRight: `${captionPreviewLayout.marginXPercent}%`,
+                  paddingBottom: `${captionPreviewLayout.marginBottomPercent}%`,
+                }}
+              >
+                <div
+                  className="mx-auto w-full text-center text-white"
+                  style={{
+                    fontSize: `${captionPreviewLayout.fontSizePx}px`,
+                    lineHeight: captionPreviewLayout.lineHeight,
+                    fontWeight: captionPreviewTheme.bold ? 700 : 500,
+                    fontStyle: captionPreviewTheme.italic ? "italic" : "normal",
+                    textShadow:
+                      captionPreviewTheme.outlinePx > 0
+                        ? `0 0 ${captionPreviewTheme.outlinePx}px rgba(0,0,0,0.9), 0 2px ${
+                            captionPreviewTheme.outlinePx + 1
+                          }px rgba(0,0,0,0.75)`
+                        : "0 1px 2px rgba(0,0,0,0.75)",
+                    padding: captionPreviewTheme.boxed ? "6px 10px" : "0",
+                    borderRadius: captionPreviewTheme.boxed ? "8px" : "0",
+                    backgroundColor: `rgba(0,0,0,${captionPreviewTheme.backgroundOpacity})`,
+                  }}
+                >
+                  {captionPreviewLines.map((line, index) => (
+                    <div key={`caption-preview-line-${index}`}>{line}</div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="pointer-events-none absolute right-2 top-2 z-20 rounded-md bg-black/65 px-2 py-1 text-[11px] text-slate-200">
+              {captionFormat === "burned_in" ? "Burned-in caption preview" : "SRT style preview"}
+            </div>
+            </div>
           </div>
           {previewError ? <p className="mt-2 text-sm text-red-400">{previewError}</p> : null}
+
+          <div className="mt-4 rounded-lg border border-slate-700 bg-slate-900/40 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
+              <span>Source Timeline</span>
+              <span>
+                Playhead {formatClockTime(playerCurrentTime)} / {formatClockTime(normalizedMediaDuration)}
+              </span>
+            </div>
+
+            {timelineMetrics ? (
+              <>
+                <div className="relative mt-3 h-5">
+                  <div className="absolute inset-x-0 top-1/2 h-2 -translate-y-1/2 rounded-full bg-slate-800" />
+                  <div
+                    className="absolute top-1/2 h-2 -translate-y-1/2 rounded-full border border-[#A78BFA] bg-[#7C3AED]/45"
+                    style={{
+                      left: `${timelineMetrics.clipStartPercent}%`,
+                      width: `${timelineMetrics.clipWidthPercent}%`,
+                    }}
+                  />
+
+                  <div
+                    className="absolute top-0 h-5 w-0.5 bg-[#C4B5FD]"
+                    style={{ left: `${timelineMetrics.clipStartPercent}%` }}
+                  />
+                  <div
+                    className="absolute top-0 h-5 w-0.5 bg-[#C4B5FD]"
+                    style={{ left: `${timelineMetrics.clipEndPercent}%` }}
+                  />
+
+                  <div
+                    className="absolute top-0 h-5 w-0.5 bg-sky-300"
+                    style={{ left: `${timelineMetrics.playheadPercent}%` }}
+                  >
+                    <div className="absolute -left-1 -top-1 h-2 w-2 rounded-full bg-sky-300" />
+                  </div>
+                </div>
+                <div className="mt-1 flex items-center justify-between text-[11px] text-slate-500">
+                  <span>0:00</span>
+                  <span>{formatClockTime(normalizedMediaDuration)}</span>
+                </div>
+              </>
+            ) : (
+              <p className="mt-2 text-xs text-slate-500">
+                Timeline becomes active after valid clip timings and video metadata are available.
+              </p>
+            )}
+
+            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <div className="rounded-md border border-slate-700 bg-slate-950/60 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-slate-400">Clip Start</p>
+                <p className="text-sm font-semibold text-white">
+                  {formatClockTime(normalizedClipRange?.start ?? parseNumberInput(clipStart) ?? 0)}
+                </p>
+              </div>
+              <div className="rounded-md border border-slate-700 bg-slate-950/60 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-slate-400">Clip End</p>
+                <p className="text-sm font-semibold text-white">
+                  {formatClockTime(normalizedClipRange?.end ?? parseNumberInput(clipEnd) ?? 0)}
+                </p>
+              </div>
+              <div className="rounded-md border border-[#7C3AED]/50 bg-[#7C3AED]/10 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-[#C4B5FD]">Clip Duration</p>
+                <p className="text-base font-semibold text-white">{formatSeconds(normalizedClipRange?.duration ?? computedDuration)}</p>
+              </div>
+            </div>
+          </div>
 
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <button
@@ -277,10 +504,12 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
               onClick={handleSeekStart}
               className="rounded-md border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"
             >
-              Seek to Start
+              Jump to Clip Start
             </button>
             <span className="text-xs text-slate-400">
-              Clip range: {clipStart}s - {clipEnd}s ({formatSeconds(computedDuration)})
+              Clip range: {formatClockTime(normalizedClipRange?.start ?? parseNumberInput(clipStart) ?? 0)} -{" "}
+              {formatClockTime(normalizedClipRange?.end ?? parseNumberInput(clipEnd) ?? 0)} (
+              {formatSeconds(normalizedClipRange?.duration ?? computedDuration)})
             </span>
           </div>
         </Card>
