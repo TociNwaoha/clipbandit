@@ -142,6 +142,7 @@ def write_ass(
     target_width: int,
     target_height: int,
     caption_vertical_position: float | None = None,
+    caption_scale: float | None = None,
 ) -> str:
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -152,6 +153,7 @@ def write_ass(
         target_width=target_width,
         target_height=target_height,
         caption_vertical_position=caption_vertical_position,
+        caption_scale=caption_scale,
     )
     style_line = _ass_style_line(caption_style, layout)
 
@@ -471,6 +473,7 @@ def _caption_layout(
     target_width: int,
     target_height: int,
     caption_vertical_position: float | None,
+    caption_scale: float | None,
 ) -> CaptionLayout:
     if aspect_ratio == "9:16" or target_width < target_height:
         profile = "vertical"
@@ -504,6 +507,12 @@ def _caption_layout(
         font_size = int(round(base_font * 0.96))
     else:
         font_size = int(round(base_font * 0.92))
+
+    if caption_scale is None:
+        scale = 1.0
+    else:
+        scale = min(1.6, max(0.7, float(caption_scale)))
+    font_size = int(round(font_size * scale))
 
     if caption_vertical_position is not None:
         position_pct = min(35.0, max(5.0, float(caption_vertical_position)))

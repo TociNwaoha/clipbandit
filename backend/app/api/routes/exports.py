@@ -32,6 +32,12 @@ def _normalize_caption_vertical_position(value: float | None) -> float | None:
     return round(min(35.0, max(5.0, float(value))), 2)
 
 
+def _normalize_caption_scale(value: float | None) -> float:
+    if value is None:
+        return 1.0
+    return round(min(1.6, max(0.7, float(value))), 3)
+
+
 def _normalize_frame_anchor(value: float | None) -> float:
     if value is None:
         return 0.5
@@ -87,6 +93,7 @@ def _to_response(
         caption_style=export.caption_style,
         caption_format=export.caption_format,
         caption_vertical_position=export.caption_vertical_position,
+        caption_scale=export.caption_scale,
         frame_anchor_x=export.frame_anchor_x,
         frame_anchor_y=export.frame_anchor_y,
         frame_zoom=export.frame_zoom,
@@ -204,18 +211,20 @@ async def create_export(
     current_user: User = Depends(get_current_user),
 ):
     logger.info(
-        "[exports] create requested user_id=%s clip_id=%s aspect_ratio=%s caption_style=%s caption_format=%s caption_vertical_position=%s frame_anchor_x=%s frame_anchor_y=%s frame_zoom=%s",
+        "[exports] create requested user_id=%s clip_id=%s aspect_ratio=%s caption_style=%s caption_format=%s caption_vertical_position=%s caption_scale=%s frame_anchor_x=%s frame_anchor_y=%s frame_zoom=%s",
         current_user.id,
         body.clip_id,
         body.aspect_ratio,
         body.caption_style,
         body.caption_format,
         body.caption_vertical_position,
+        body.caption_scale,
         body.frame_anchor_x,
         body.frame_anchor_y,
         body.frame_zoom,
     )
     caption_vertical_position = _normalize_caption_vertical_position(body.caption_vertical_position)
+    caption_scale = _normalize_caption_scale(body.caption_scale)
     frame_anchor_x = _normalize_frame_anchor(body.frame_anchor_x)
     frame_anchor_y = _normalize_frame_anchor(body.frame_anchor_y)
     frame_zoom = _normalize_frame_zoom(body.frame_zoom)
@@ -238,6 +247,7 @@ async def create_export(
             Export.aspect_ratio == body.aspect_ratio,
             Export.caption_style == body.caption_style,
             Export.caption_format == body.caption_format,
+            Export.caption_scale == caption_scale,
             Export.frame_anchor_x == frame_anchor_x,
             Export.frame_anchor_y == frame_anchor_y,
             Export.frame_zoom == frame_zoom,
@@ -270,6 +280,7 @@ async def create_export(
         caption_style=body.caption_style,
         caption_format=body.caption_format,
         caption_vertical_position=caption_vertical_position,
+        caption_scale=caption_scale,
         frame_anchor_x=frame_anchor_x,
         frame_anchor_y=frame_anchor_y,
         frame_zoom=frame_zoom,
@@ -288,6 +299,7 @@ async def create_export(
             "caption_style": _enum_value(body.caption_style) if body.caption_style else None,
             "caption_format": _enum_value(body.caption_format),
             "caption_vertical_position": caption_vertical_position,
+            "caption_scale": caption_scale,
             "frame_anchor_x": frame_anchor_x,
             "frame_anchor_y": frame_anchor_y,
             "frame_zoom": frame_zoom,
@@ -331,6 +343,7 @@ async def retry_export(
         caption_style=original_export.caption_style,
         caption_format=original_export.caption_format,
         caption_vertical_position=original_export.caption_vertical_position,
+        caption_scale=original_export.caption_scale,
         frame_anchor_x=original_export.frame_anchor_x,
         frame_anchor_y=original_export.frame_anchor_y,
         frame_zoom=original_export.frame_zoom,
@@ -349,6 +362,7 @@ async def retry_export(
             "caption_style": _enum_value(retry_export_row.caption_style) if retry_export_row.caption_style else None,
             "caption_format": _enum_value(retry_export_row.caption_format),
             "caption_vertical_position": retry_export_row.caption_vertical_position,
+            "caption_scale": retry_export_row.caption_scale,
             "frame_anchor_x": retry_export_row.frame_anchor_x,
             "frame_anchor_y": retry_export_row.frame_anchor_y,
             "frame_zoom": retry_export_row.frame_zoom,

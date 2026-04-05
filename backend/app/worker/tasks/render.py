@@ -151,15 +151,18 @@ def render_export(self, export_id: str, job_id: str | None = None):
                     target_width,
                     target_height,
                     export.caption_vertical_position,
+                    export.caption_scale,
                 )
             logger.info("[render] caption generation end export_id=%s cues=%s", export.id, len(cues))
 
             output_path = tmp_dir / "output.mp4"
             logger.info(
-                "[render] ffmpeg render start export_id=%s aspect_ratio=%s caption_format=%s frame_anchor_x=%s frame_anchor_y=%s frame_zoom=%s",
+                "[render] ffmpeg render start export_id=%s aspect_ratio=%s caption_format=%s caption_vertical_position=%s caption_scale=%s frame_anchor_x=%s frame_anchor_y=%s frame_zoom=%s",
                 export.id,
                 _enum_value(export.aspect_ratio),
                 _enum_value(export.caption_format),
+                export.caption_vertical_position,
+                export.caption_scale,
                 export.frame_anchor_x,
                 export.frame_anchor_y,
                 export.frame_zoom,
