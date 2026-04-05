@@ -10,6 +10,9 @@ class ExportCreate(BaseModel):
     caption_style: CaptionStyle | None = None
     caption_format: CaptionFormat
     caption_vertical_position: float | None = None
+    frame_anchor_x: float | None = None
+    frame_anchor_y: float | None = None
+    frame_zoom: float | None = None
 
 
 class ExportResponse(BaseModel):
@@ -21,6 +24,9 @@ class ExportResponse(BaseModel):
     caption_style: CaptionStyle | None
     caption_format: CaptionFormat
     caption_vertical_position: float | None = None
+    frame_anchor_x: float | None = None
+    frame_anchor_y: float | None = None
+    frame_zoom: float | None = None
     storage_key: str | None
     srt_key: str | None
     download_url: str | None

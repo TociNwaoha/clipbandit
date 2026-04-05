@@ -60,6 +60,9 @@ class Export(Base):
         SAEnum(CaptionFormat, name="caption_format"), nullable=False
     )
     caption_vertical_position: Mapped[float | None] = mapped_column(Float)
+    frame_anchor_x: Mapped[float | None] = mapped_column(Float)
+    frame_anchor_y: Mapped[float | None] = mapped_column(Float)
+    frame_zoom: Mapped[float | None] = mapped_column(Float)
     storage_key: Mapped[str | None] = mapped_column(Text)
     srt_key: Mapped[str | None] = mapped_column(Text)
     download_url: Mapped[str | None] = mapped_column(Text)

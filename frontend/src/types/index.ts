@@ -109,6 +109,9 @@ export interface Export {
   caption_style: CaptionStyle | null;
   caption_format: CaptionFormat;
   caption_vertical_position?: number | null;
+  frame_anchor_x?: number | null;
+  frame_anchor_y?: number | null;
+  frame_zoom?: number | null;
   storage_key: string | null;
   srt_key: string | null;
   download_url: string | null;

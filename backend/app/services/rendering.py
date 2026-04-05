@@ -30,6 +30,16 @@ class CaptionLayout:
     max_lines: int = 3
 
 
+@dataclass(frozen=True)
+class CropWindow:
+    x: int
+    y: int
+    width: int
+    height: int
+    source_width: int
+    source_height: int
+
+
 def has_video_stream(media_path: str) -> bool:
     cmd = [
         "ffprobe",
@@ -189,24 +199,40 @@ def render_video_clip(
     target_width: int,
     target_height: int,
     burned_ass_path: str | None = None,
+    frame_anchor_x: float | None = None,
+    frame_anchor_y: float | None = None,
+    frame_zoom: float | None = None,
 ) -> str:
     if clip_end <= clip_start:
         raise ValueError("Clip end time must be greater than start time")
 
-    if aspect_ratio == "original":
-        filter_chain = [
-            f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease",
-            f"pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:black",
-            "setsar=1",
-            "format=yuv420p",
-        ]
-    else:
-        filter_chain = [
-            f"scale={target_width}:{target_height}:force_original_aspect_ratio=increase",
-            f"crop={target_width}:{target_height}",
-            "setsar=1",
-            "format=yuv420p",
-        ]
+    crop_window = resolve_crop_window(
+        aspect_ratio=aspect_ratio,
+        source_path=source_path,
+        frame_anchor_x=frame_anchor_x,
+        frame_anchor_y=frame_anchor_y,
+        frame_zoom=frame_zoom,
+    )
+    logger.info(
+        "Resolved crop window aspect=%s zoom=%.3f anchor=(%.3f, %.3f) source=%sx%s crop=x%s:y%s:w%s:h%s",
+        aspect_ratio,
+        _normalize_frame_zoom(frame_zoom),
+        _normalize_anchor(frame_anchor_x),
+        _normalize_anchor(frame_anchor_y),
+        crop_window.source_width,
+        crop_window.source_height,
+        crop_window.x,
+        crop_window.y,
+        crop_window.width,
+        crop_window.height,
+    )
+
+    filter_chain = [
+        f"crop={crop_window.width}:{crop_window.height}:{crop_window.x}:{crop_window.y}",
+        f"scale={target_width}:{target_height}:flags=lanczos",
+        "setsar=1",
+        "format=yuv420p",
+    ]
 
     if burned_ass_path:
         ass_filter_path = _escape_filter_path(burned_ass_path)
@@ -262,6 +288,110 @@ def resolve_output_dimensions(aspect_ratio: str, source_path: str) -> tuple[int,
         target_height = _ensure_even(int(round(source_height * scale)))
         return max(2, target_width), max(2, target_height)
     raise ValueError(f"Unsupported aspect ratio: {aspect_ratio}")
+
+
+def resolve_crop_window(
+    aspect_ratio: str,
+    source_path: str,
+    frame_anchor_x: float | None = None,
+    frame_anchor_y: float | None = None,
+    frame_zoom: float | None = None,
+) -> CropWindow:
+    source_width, source_height = _probe_video_dimensions(source_path)
+    if source_width <= 0 or source_height <= 0:
+        raise ValueError("Unable to resolve source dimensions for export reframing")
+
+    source_aspect = source_width / float(source_height)
+    target_aspect = _target_aspect_ratio(aspect_ratio, source_aspect)
+    zoom = _normalize_frame_zoom(frame_zoom)
+    anchor_x = _normalize_anchor(frame_anchor_x)
+    anchor_y = _normalize_anchor(frame_anchor_y)
+
+    if source_aspect >= target_aspect:
+        base_height = float(source_height)
+        base_width = base_height * target_aspect
+    else:
+        base_width = float(source_width)
+        base_height = base_width / target_aspect
+
+    crop_width = min(float(source_width), base_width / zoom)
+    crop_height = min(float(source_height), base_height / zoom)
+
+    # Keep the crop ratio stable after float math and before integer conversion.
+    if crop_width / crop_height > target_aspect:
+        crop_width = crop_height * target_aspect
+    else:
+        crop_height = crop_width / target_aspect
+
+    crop_width_int = _clamp_even_dimension(int(round(crop_width)), source_width)
+    crop_height_int = _clamp_even_dimension(int(round(crop_height)), source_height)
+
+    max_x = max(0, source_width - crop_width_int)
+    max_y = max(0, source_height - crop_height_int)
+
+    center_x = anchor_x * source_width
+    center_y = anchor_y * source_height
+    raw_x = int(round(center_x - (crop_width_int / 2.0)))
+    raw_y = int(round(center_y - (crop_height_int / 2.0)))
+
+    crop_x = _clamp_even_offset(raw_x, max_x)
+    crop_y = _clamp_even_offset(raw_y, max_y)
+
+    return CropWindow(
+        x=crop_x,
+        y=crop_y,
+        width=crop_width_int,
+        height=crop_height_int,
+        source_width=source_width,
+        source_height=source_height,
+    )
+
+
+def _target_aspect_ratio(aspect_ratio: str, source_aspect: float) -> float:
+    normalized = (aspect_ratio or "").strip()
+    if normalized == "original":
+        return source_aspect
+    if normalized == "9:16":
+        return 9.0 / 16.0
+    if normalized == "16:9":
+        return 16.0 / 9.0
+    if normalized == "1:1":
+        return 1.0
+    raise ValueError(f"Unsupported aspect ratio: {aspect_ratio}")
+
+
+def _normalize_anchor(value: float | None) -> float:
+    if value is None:
+        return 0.5
+    return min(1.0, max(0.0, float(value)))
+
+
+def _normalize_frame_zoom(value: float | None) -> float:
+    if value is None:
+        return 1.0
+    return min(3.0, max(1.0, float(value)))
+
+
+def _clamp_even_dimension(value: int, source_max: int) -> int:
+    bounded = min(max(2, value), max(2, source_max))
+    if bounded % 2 == 1:
+        bounded -= 1
+    if bounded < 2:
+        bounded = 2
+    if bounded > source_max:
+        bounded = source_max if source_max % 2 == 0 else max(2, source_max - 1)
+    return bounded
+
+
+def _clamp_even_offset(value: int, max_offset: int) -> int:
+    bounded = min(max(0, value), max_offset)
+    if bounded % 2 == 1:
+        bounded -= 1
+    if bounded < 0:
+        bounded = 0
+    if bounded > max_offset:
+        bounded = max_offset
+    return bounded
 
 
 def _normalize_text(text: str) -> str:

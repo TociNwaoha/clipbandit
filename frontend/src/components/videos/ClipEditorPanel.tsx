@@ -75,6 +75,17 @@ function parseResolutionAspectRatio(resolution: string | null | undefined): numb
   return width / height;
 }
 
+function aspectRatioToValue(aspectRatio: AspectRatio, sourceAspectRatio: number): number {
+  if (aspectRatio === "9:16") return 9 / 16;
+  if (aspectRatio === "16:9") return 16 / 9;
+  if (aspectRatio === "1:1") return 1;
+  return sourceAspectRatio;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
 export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEditorPanelProps) {
   const sourceAspectFromResolution = parseResolutionAspectRatio(video.resolution);
   const [clip, setClip] = useState<Clip>(initialClip);
@@ -88,6 +99,9 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle>("bold_boxed");
   const [captionFormat, setCaptionFormat] = useState<CaptionFormat>("burned_in");
   const [captionVerticalPosition, setCaptionVerticalPosition] = useState<number>(15);
+  const [frameAnchorX, setFrameAnchorX] = useState<number>(0.5);
+  const [frameAnchorY, setFrameAnchorY] = useState<number>(0.5);
+  const [frameZoom, setFrameZoom] = useState<number>(1);
   const [exports, setExports] = useState<Export[]>(initialExports);
   const [exportsLoading, setExportsLoading] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -99,9 +113,12 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
   const [playerCurrentTime, setPlayerCurrentTime] = useState<number>(0);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [isTimelineScrubbing, setIsTimelineScrubbing] = useState(false);
+  const [isFrameDragging, setIsFrameDragging] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const framedVideoRef = useRef<HTMLVideoElement | null>(null);
   const timelineRef = useRef<HTMLDivElement | null>(null);
+  const framingOverlayRef = useRef<HTMLDivElement | null>(null);
   const replayStopAtRef = useRef<number | null>(null);
   const replayActiveRef = useRef<boolean>(false);
   const replayTokenRef = useRef<number>(0);
@@ -164,19 +181,69 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
 
   const effectiveSourceAspectRatio = sourceAspectRatio ?? sourceAspectFromResolution ?? 16 / 9;
 
-  const previewAspectRatioValue = useMemo(() => {
+  const outputPreviewAspect = useMemo(
+    () => aspectRatioToValue(aspectRatio, effectiveSourceAspectRatio),
+    [aspectRatio, effectiveSourceAspectRatio]
+  );
+  const outputPreviewAspectRatioValue = useMemo(() => {
     if (aspectRatio === "9:16") return "9 / 16";
     if (aspectRatio === "16:9") return "16 / 9";
     if (aspectRatio === "1:1") return "1 / 1";
     return `${effectiveSourceAspectRatio}`;
   }, [aspectRatio, effectiveSourceAspectRatio]);
 
-  const previewMaxWidthClass = useMemo(() => {
-    const ratio = aspectRatio === "original" ? effectiveSourceAspectRatio : aspectRatio === "9:16" ? 9 / 16 : aspectRatio === "16:9" ? 16 / 9 : 1;
-    if (ratio <= 0.8) return "max-w-[360px]";
-    if (ratio >= 1.45) return "max-w-[760px]";
-    return "max-w-[520px]";
-  }, [aspectRatio, effectiveSourceAspectRatio]);
+  const frameGeometry = useMemo(() => {
+    const sourceAspect = Math.max(0.0001, effectiveSourceAspectRatio);
+    const targetAspect = Math.max(0.0001, outputPreviewAspect);
+    const safeZoom = clamp(frameZoom, 1, 3);
+
+    let baseWidth = 1;
+    let baseHeight = 1;
+    if (sourceAspect > targetAspect) {
+      baseWidth = targetAspect / sourceAspect;
+      baseHeight = 1;
+    } else {
+      baseWidth = 1;
+      baseHeight = sourceAspect / targetAspect;
+    }
+
+    const frameWidth = clamp(baseWidth / safeZoom, 0.01, 1);
+    const frameHeight = clamp(baseHeight / safeZoom, 0.01, 1);
+    const minCenterX = frameWidth / 2;
+    const maxCenterX = 1 - frameWidth / 2;
+    const minCenterY = frameHeight / 2;
+    const maxCenterY = 1 - frameHeight / 2;
+
+    return {
+      targetAspect,
+      frameWidth,
+      frameHeight,
+      minCenterX,
+      maxCenterX,
+      minCenterY,
+      maxCenterY,
+      safeZoom,
+    };
+  }, [effectiveSourceAspectRatio, outputPreviewAspect, frameZoom]);
+
+  const clampedFrameAnchorX = useMemo(
+    () => clamp(frameAnchorX, frameGeometry.minCenterX, frameGeometry.maxCenterX),
+    [frameAnchorX, frameGeometry.maxCenterX, frameGeometry.minCenterX]
+  );
+  const clampedFrameAnchorY = useMemo(
+    () => clamp(frameAnchorY, frameGeometry.minCenterY, frameGeometry.maxCenterY),
+    [frameAnchorY, frameGeometry.maxCenterY, frameGeometry.minCenterY]
+  );
+
+  const frameOverlayStyle = useMemo(
+    () => ({
+      left: `${(clampedFrameAnchorX - frameGeometry.frameWidth / 2) * 100}%`,
+      top: `${(clampedFrameAnchorY - frameGeometry.frameHeight / 2) * 100}%`,
+      width: `${frameGeometry.frameWidth * 100}%`,
+      height: `${frameGeometry.frameHeight * 100}%`,
+    }),
+    [clampedFrameAnchorX, clampedFrameAnchorY, frameGeometry.frameHeight, frameGeometry.frameWidth]
+  );
 
   const captionPreviewLayout = useMemo(
     () => getCaptionPreviewLayout(captionStyle, aspectRatio, effectiveSourceAspectRatio),
@@ -223,6 +290,24 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
     return () => clearInterval(timer);
   }, [activeExportExists, clip.id]);
 
+  const syncFramedPreviewTime = useCallback((time: number) => {
+    const framed = framedVideoRef.current;
+    if (!framed || !Number.isFinite(time)) return;
+    if (Math.abs(framed.currentTime - time) > 0.08) {
+      framed.currentTime = time;
+    }
+  }, []);
+
+  const syncFramedPreviewPlayState = useCallback((isPlaying: boolean) => {
+    const framed = framedVideoRef.current;
+    if (!framed) return;
+    if (isPlaying) {
+      void framed.play().catch(() => undefined);
+    } else {
+      framed.pause();
+    }
+  }, []);
+
   const clearClipPlaybackMode = useCallback(() => {
     replayActiveRef.current = false;
     replayStopAtRef.current = null;
@@ -251,9 +336,49 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
         window.setTimeout(done, 250);
       });
       setPlayerCurrentTime(clamped);
+      syncFramedPreviewTime(clamped);
     },
-    [normalizedMediaDuration]
+    [normalizedMediaDuration, syncFramedPreviewTime]
   );
+
+  const handleAspectRatioChange = (nextRatio: AspectRatio) => {
+    setAspectRatio(nextRatio);
+    setFrameAnchorX(0.5);
+    setFrameAnchorY(0.5);
+    setFrameZoom(1);
+  };
+
+  const updateFrameAnchorFromClientPoint = useCallback(
+    (clientX: number, clientY: number) => {
+      const overlay = framingOverlayRef.current;
+      if (!overlay) return;
+      const rect = overlay.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      const normalizedX = (clientX - rect.left) / rect.width;
+      const normalizedY = (clientY - rect.top) / rect.height;
+      setFrameAnchorX(clamp(normalizedX, frameGeometry.minCenterX, frameGeometry.maxCenterX));
+      setFrameAnchorY(clamp(normalizedY, frameGeometry.minCenterY, frameGeometry.maxCenterY));
+    },
+    [frameGeometry.maxCenterX, frameGeometry.maxCenterY, frameGeometry.minCenterX, frameGeometry.minCenterY]
+  );
+
+  const handleFramePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    setIsFrameDragging(true);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    updateFrameAnchorFromClientPoint(event.clientX, event.clientY);
+  };
+
+  const handleFramePointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    if (!isFrameDragging) return;
+    updateFrameAnchorFromClientPoint(event.clientX, event.clientY);
+  };
+
+  const handleFramePointerUp = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    setIsFrameDragging(false);
+  };
 
   const seekByTimelinePosition = useCallback(
     (clientX: number) => {
@@ -268,8 +393,9 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
       clearClipPlaybackMode();
       player.currentTime = nextTime;
       setPlayerCurrentTime(nextTime);
+      syncFramedPreviewTime(nextTime);
     },
-    [clearClipPlaybackMode, normalizedMediaDuration]
+    [clearClipPlaybackMode, normalizedMediaDuration, syncFramedPreviewTime]
   );
 
   const handleTimelinePointerDown = (event: PointerEvent<HTMLDivElement>) => {
@@ -323,6 +449,7 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
     const player = videoRef.current;
     if (!player) return;
     setPlayerCurrentTime(player.currentTime);
+    syncFramedPreviewTime(player.currentTime);
 
     if (!replayActiveRef.current) return;
     const stopAt = replayStopAtRef.current;
@@ -339,6 +466,7 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
     const player = videoRef.current;
     if (!player) return;
     setPlayerCurrentTime(player.currentTime);
+    syncFramedPreviewTime(player.currentTime);
     const stopAt = replayStopAtRef.current;
     if (replayActiveRef.current && stopAt !== null && player.currentTime > stopAt) {
       player.pause();
@@ -346,6 +474,14 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
       setPlayerCurrentTime(stopAt);
       clearClipPlaybackMode();
     }
+  };
+
+  const handleSourcePlay = () => {
+    syncFramedPreviewPlayState(true);
+  };
+
+  const handleSourcePause = () => {
+    syncFramedPreviewPlayState(false);
   };
 
   const handleSaveTrim = async () => {
@@ -402,6 +538,9 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
         caption_style: captionStyle,
         caption_format: captionFormat,
         caption_vertical_position: captionVerticalPosition,
+        frame_anchor_x: clampedFrameAnchorX,
+        frame_anchor_y: clampedFrameAnchorY,
+        frame_zoom: frameGeometry.safeZoom,
       });
       setExports((prev) => {
         const existingIndex = prev.findIndex((item) => item.id === created.id);
@@ -452,82 +591,149 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
           <p className="mt-1 text-xs text-slate-400">
             Source preview with current clip boundaries and caption style preview for selected export settings.
           </p>
-          <div className={`relative mx-auto mt-4 w-full ${previewMaxWidthClass}`}>
-            <div className="mb-2 flex items-center justify-between text-xs text-slate-400">
-              <span>Preview Frame</span>
-              <span>
-                {aspectRatio} • {captionStyle} • {captionFormat}
-              </span>
-            </div>
-            <div
-              className="relative overflow-hidden rounded-lg border border-slate-700 bg-black"
-              style={{ aspectRatio: previewAspectRatioValue }}
-            >
-            {sourceUrl ? (
-              <video
-                ref={videoRef}
-                controls
-                src={sourceUrl}
-                className="h-full w-full bg-black object-cover"
-                onLoadedMetadata={(event) => {
-                  const duration = event.currentTarget.duration;
-                  if (Number.isFinite(duration) && duration > 0) {
-                    setMediaDuration(duration);
-                  }
-                  const width = event.currentTarget.videoWidth;
-                  const height = event.currentTarget.videoHeight;
-                  if (width > 0 && height > 0) {
-                    setSourceAspectRatio(width / height);
-                  }
-                  setPlayerCurrentTime(event.currentTarget.currentTime || 0);
-                }}
-                onError={() => setPreviewError("Preview failed to load source video.")}
-                onTimeUpdate={handleTimeUpdate}
-                onSeeked={handleSeeked}
-              />
-            ) : (
-              <div className="flex h-full items-center justify-center text-sm text-slate-400">
-                Source preview URL is unavailable for this video.
+          <div className="mt-4 grid gap-4 xl:grid-cols-2">
+            <div>
+              <div className="mb-2 flex items-center justify-between text-xs text-slate-400">
+                <span>Source Preview</span>
+                <span>{formatClockTime(playerCurrentTime)}</span>
               </div>
-            )}
-
-            <div className="pointer-events-none absolute inset-0 z-20 flex items-end justify-center">
               <div
-                className="w-full"
-                style={{
-                  paddingLeft: `${captionPreviewLayout.marginXPercent}%`,
-                  paddingRight: `${captionPreviewLayout.marginXPercent}%`,
-                  paddingBottom: `${captionVerticalPosition}%`,
-                }}
+                ref={framingOverlayRef}
+                className="relative overflow-hidden rounded-lg border border-slate-700 bg-black"
+                style={{ aspectRatio: `${effectiveSourceAspectRatio}` }}
               >
+                {sourceUrl ? (
+                  <video
+                    ref={videoRef}
+                    controls
+                    src={sourceUrl}
+                    className="h-full w-full bg-black object-contain"
+                    onLoadedMetadata={(event) => {
+                      const duration = event.currentTarget.duration;
+                      if (Number.isFinite(duration) && duration > 0) {
+                        setMediaDuration(duration);
+                      }
+                      const width = event.currentTarget.videoWidth;
+                      const height = event.currentTarget.videoHeight;
+                      if (width > 0 && height > 0) {
+                        setSourceAspectRatio(width / height);
+                      }
+                      setPlayerCurrentTime(event.currentTarget.currentTime || 0);
+                      syncFramedPreviewTime(event.currentTarget.currentTime || 0);
+                    }}
+                    onError={() => setPreviewError("Preview failed to load source video.")}
+                    onTimeUpdate={handleTimeUpdate}
+                    onSeeked={handleSeeked}
+                    onPlay={handleSourcePlay}
+                    onPause={handleSourcePause}
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-sm text-slate-400">
+                    Source preview URL is unavailable for this video.
+                  </div>
+                )}
+
                 <div
-                  className="mx-auto w-full text-center text-white"
-                  style={{
-                    fontSize: `${captionPreviewLayout.fontSizePx}px`,
-                    lineHeight: captionPreviewLayout.lineHeight,
-                    fontWeight: captionPreviewTheme.bold ? 700 : 500,
-                    fontStyle: captionPreviewTheme.italic ? "italic" : "normal",
-                    textShadow:
-                      captionPreviewTheme.outlinePx > 0
-                        ? `0 0 ${captionPreviewTheme.outlinePx}px rgba(0,0,0,0.9), 0 2px ${
-                            captionPreviewTheme.outlinePx + 1
-                          }px rgba(0,0,0,0.75)`
-                        : "0 1px 2px rgba(0,0,0,0.75)",
-                    padding: captionPreviewTheme.boxed ? "6px 10px" : "0",
-                    borderRadius: captionPreviewTheme.boxed ? "8px" : "0",
-                    backgroundColor: `rgba(0,0,0,${captionPreviewTheme.backgroundOpacity})`,
-                  }}
-                >
-                  {captionPreviewLines.map((line, index) => (
-                    <div key={`caption-preview-line-${index}`}>{line}</div>
-                  ))}
+                  className="absolute inset-x-0 bottom-14 top-0 z-10 cursor-crosshair touch-none"
+                  onPointerDown={handleFramePointerDown}
+                  onPointerMove={handleFramePointerMove}
+                  onPointerUp={handleFramePointerUp}
+                  onPointerCancel={handleFramePointerUp}
+                />
+
+                <div className="pointer-events-none absolute inset-0 z-20">
+                  <div
+                    className="absolute border-2 border-[#A78BFA] bg-[#7C3AED]/10 shadow-[0_0_0_9999px_rgba(2,6,23,0.45)]"
+                    style={frameOverlayStyle}
+                  >
+                    <div className="absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#C4B5FD]" />
+                  </div>
                 </div>
               </div>
+              <p className="mt-2 text-xs text-slate-400">
+                Drag directly on the source preview to position the reframing window.
+              </p>
             </div>
 
-            <div className="pointer-events-none absolute right-2 top-2 z-20 rounded-md bg-black/65 px-2 py-1 text-[11px] text-slate-200">
-              {captionFormat === "burned_in" ? "Burned-in caption preview" : "SRT style preview"}
-            </div>
+            <div>
+              <div className="mb-2 flex items-center justify-between text-xs text-slate-400">
+                <span>Framed Output Preview</span>
+                <span>
+                  {aspectRatio} • {frameGeometry.safeZoom.toFixed(2)}x
+                </span>
+              </div>
+              <div
+                className="relative overflow-hidden rounded-lg border border-slate-700 bg-black"
+                style={{ aspectRatio: outputPreviewAspectRatioValue }}
+              >
+                {sourceUrl ? (
+                  <video
+                    ref={framedVideoRef}
+                    muted
+                    playsInline
+                    src={sourceUrl}
+                    className="h-full w-full bg-black object-cover"
+                    style={{
+                      transform: `scale(${frameGeometry.safeZoom})`,
+                      transformOrigin: `${clampedFrameAnchorX * 100}% ${clampedFrameAnchorY * 100}%`,
+                    }}
+                    onLoadedMetadata={() => {
+                      const sourcePlayer = videoRef.current;
+                      const framedPlayer = framedVideoRef.current;
+                      if (!sourcePlayer || !framedPlayer) return;
+                      framedPlayer.currentTime = sourcePlayer.currentTime;
+                      if (sourcePlayer.paused) {
+                        framedPlayer.pause();
+                      } else {
+                        void framedPlayer.play().catch(() => undefined);
+                      }
+                    }}
+                    onError={() => setPreviewError("Preview failed to load source video.")}
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-sm text-slate-400">
+                    Framed preview unavailable because source video is missing.
+                  </div>
+                )}
+
+                <div className="pointer-events-none absolute inset-0 z-20 flex items-end justify-center">
+                  <div
+                    className="w-full"
+                    style={{
+                      paddingLeft: `${captionPreviewLayout.marginXPercent}%`,
+                      paddingRight: `${captionPreviewLayout.marginXPercent}%`,
+                      paddingBottom: `${captionVerticalPosition}%`,
+                    }}
+                  >
+                    <div
+                      className="mx-auto w-full text-center text-white"
+                      style={{
+                        fontSize: `${captionPreviewLayout.fontSizePx}px`,
+                        lineHeight: captionPreviewLayout.lineHeight,
+                        fontWeight: captionPreviewTheme.bold ? 700 : 500,
+                        fontStyle: captionPreviewTheme.italic ? "italic" : "normal",
+                        textShadow:
+                          captionPreviewTheme.outlinePx > 0
+                            ? `0 0 ${captionPreviewTheme.outlinePx}px rgba(0,0,0,0.9), 0 2px ${
+                                captionPreviewTheme.outlinePx + 1
+                              }px rgba(0,0,0,0.75)`
+                            : "0 1px 2px rgba(0,0,0,0.75)",
+                        padding: captionPreviewTheme.boxed ? "6px 10px" : "0",
+                        borderRadius: captionPreviewTheme.boxed ? "8px" : "0",
+                        backgroundColor: `rgba(0,0,0,${captionPreviewTheme.backgroundOpacity})`,
+                      }}
+                    >
+                      {captionPreviewLines.map((line, index) => (
+                        <div key={`caption-preview-line-${index}`}>{line}</div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pointer-events-none absolute right-2 top-2 z-20 rounded-md bg-black/65 px-2 py-1 text-[11px] text-slate-200">
+                  {captionFormat === "burned_in" ? "Burned-in caption preview" : "SRT style preview"}
+                </div>
+              </div>
             </div>
           </div>
           {previewError ? <p className="mt-2 text-sm text-red-400">{previewError}</p> : null}
@@ -681,6 +887,47 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
             {saveMessage ? <p className="text-xs text-emerald-300">{saveMessage}</p> : null}
             {saveError ? <p className="text-xs text-red-400">{saveError}</p> : null}
           </div>
+
+          <div className="mt-5 border-t border-slate-700 pt-4">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-300">Framing</h4>
+            <p className="mt-1 text-xs text-slate-400">
+              Choose export aspect and drag the source frame in preview. Aspect changes reset frame to centered.
+            </p>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              {(["original", "9:16", "1:1", "16:9"] as AspectRatio[]).map((ratio) => (
+                <button
+                  key={ratio}
+                  type="button"
+                  onClick={() => handleAspectRatioChange(ratio)}
+                  className={`rounded-md border px-3 py-2 text-xs font-medium ${
+                    aspectRatio === ratio
+                      ? "border-[#7C3AED] bg-[#7C3AED]/20 text-white"
+                      : "border-slate-700 text-slate-300 hover:bg-slate-800"
+                  }`}
+                >
+                  {ratio}
+                </button>
+              ))}
+            </div>
+            <label className="mt-3 block text-xs text-slate-400">
+              Zoom
+              <div className="mt-1 flex items-center gap-3">
+                <input
+                  type="range"
+                  min={1}
+                  max={3}
+                  step={0.05}
+                  value={frameZoom}
+                  onChange={(event) => setFrameZoom(Number(event.target.value))}
+                  className="w-full accent-[#7C3AED]"
+                />
+                <span className="min-w-12 text-right text-sm text-slate-200">{frameGeometry.safeZoom.toFixed(2)}x</span>
+              </div>
+            </label>
+            <p className="mt-2 text-[11px] text-slate-500">
+              Anchor: x {clampedFrameAnchorX.toFixed(3)} • y {clampedFrameAnchorY.toFixed(3)}
+            </p>
+          </div>
         </Card>
       </div>
 
@@ -693,20 +940,10 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
 
       <Card>
         <h3 className="text-sm font-semibold text-white">Export Settings</h3>
-        <div className="mt-4 grid gap-4 md:grid-cols-3">
-          <label className="text-xs text-slate-400">
-            Preview / Export Aspect
-            <select
-              value={aspectRatio}
-              onChange={(event) => setAspectRatio(event.target.value as AspectRatio)}
-              className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white focus:border-[#7C3AED] focus:outline-none"
-            >
-              <option value="original">original</option>
-              <option value="9:16">9:16</option>
-              <option value="16:9">16:9</option>
-              <option value="1:1">1:1</option>
-            </select>
-          </label>
+        <div className="mt-3 rounded-md border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs text-slate-300">
+          Selected aspect from Framing: <span className="font-semibold text-white">{aspectRatio}</span>
+        </div>
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
           <label className="text-xs text-slate-400">
             Caption Style
             <select
@@ -730,7 +967,7 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
               <option value="srt">srt</option>
             </select>
           </label>
-          <label className="text-xs text-slate-400 md:col-span-3">
+          <label className="text-xs text-slate-400 md:col-span-2">
             Caption Vertical Position
             <div className="mt-1 flex items-center gap-3">
               <input

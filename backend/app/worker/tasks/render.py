@@ -156,10 +156,13 @@ def render_export(self, export_id: str, job_id: str | None = None):
 
             output_path = tmp_dir / "output.mp4"
             logger.info(
-                "[render] ffmpeg render start export_id=%s aspect_ratio=%s caption_format=%s",
+                "[render] ffmpeg render start export_id=%s aspect_ratio=%s caption_format=%s frame_anchor_x=%s frame_anchor_y=%s frame_zoom=%s",
                 export.id,
                 _enum_value(export.aspect_ratio),
                 _enum_value(export.caption_format),
+                export.frame_anchor_x,
+                export.frame_anchor_y,
+                export.frame_zoom,
             )
             render_video_clip(
                 source_path=str(source_path),
@@ -170,6 +173,9 @@ def render_export(self, export_id: str, job_id: str | None = None):
                 target_width=target_width,
                 target_height=target_height,
                 burned_ass_path=str(ass_local_path) if ass_local_path else None,
+                frame_anchor_x=export.frame_anchor_x,
+                frame_anchor_y=export.frame_anchor_y,
+                frame_zoom=export.frame_zoom,
             )
             logger.info("[render] ffmpeg render end export_id=%s output=%s", export.id, output_path)
 
