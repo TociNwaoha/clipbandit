@@ -25,6 +25,16 @@ def upgrade() -> None:
         "linkedin",
         name="social_platform",
     )
+    social_platform_no_create = sa.Enum(
+        "instagram",
+        "tiktok",
+        "facebook",
+        "youtube",
+        "x",
+        "linkedin",
+        name="social_platform",
+        create_type=False,
+    )
     publish_status = sa.Enum(
         "queued",
         "publishing",
@@ -34,7 +44,18 @@ def upgrade() -> None:
         "provider_not_configured",
         name="publish_status",
     )
+    publish_status_no_create = sa.Enum(
+        "queued",
+        "publishing",
+        "published",
+        "failed",
+        "waiting_user_action",
+        "provider_not_configured",
+        name="publish_status",
+        create_type=False,
+    )
     publish_mode = sa.Enum("now", "scheduled", name="publish_mode")
+    publish_mode_no_create = sa.Enum("now", "scheduled", name="publish_mode", create_type=False)
 
     bind = op.get_bind()
     social_platform.create(bind, checkfirst=True)
@@ -45,7 +66,7 @@ def upgrade() -> None:
         "connected_accounts",
         sa.Column("id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
         sa.Column("user_id", UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("platform", social_platform, nullable=False),
+        sa.Column("platform", social_platform_no_create, nullable=False),
         sa.Column("external_account_id", sa.String(length=255), nullable=False),
         sa.Column("display_name", sa.String(length=255), nullable=True),
         sa.Column("username_or_channel_name", sa.String(length=255), nullable=True),
@@ -67,15 +88,15 @@ def upgrade() -> None:
         sa.Column("user_id", UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
         sa.Column("export_id", UUID(as_uuid=True), sa.ForeignKey("exports.id", ondelete="CASCADE"), nullable=False),
         sa.Column("clip_id", UUID(as_uuid=True), sa.ForeignKey("clips.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("platform", social_platform, nullable=False),
+        sa.Column("platform", social_platform_no_create, nullable=False),
         sa.Column(
             "connected_account_id",
             UUID(as_uuid=True),
             sa.ForeignKey("connected_accounts.id", ondelete="CASCADE"),
             nullable=False,
         ),
-        sa.Column("status", publish_status, nullable=False, server_default="queued"),
-        sa.Column("publish_mode", publish_mode, nullable=False, server_default="now"),
+        sa.Column("status", publish_status_no_create, nullable=False, server_default="queued"),
+        sa.Column("publish_mode", publish_mode_no_create, nullable=False, server_default="now"),
         sa.Column("caption", sa.Text(), nullable=True),
         sa.Column("title", sa.String(length=500), nullable=True),
         sa.Column("description", sa.Text(), nullable=True),
