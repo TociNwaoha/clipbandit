@@ -7,7 +7,7 @@ Create Date: 2026-04-08 00:00:00.000000
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ENUM as PGEnum, JSONB, UUID
 
 revision = "0006"
 down_revision = "0005"
@@ -16,7 +16,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    social_platform = sa.Enum(
+    social_platform = PGEnum(
         "instagram",
         "tiktok",
         "facebook",
@@ -25,7 +25,7 @@ def upgrade() -> None:
         "linkedin",
         name="social_platform",
     )
-    social_platform_no_create = sa.Enum(
+    social_platform_no_create = PGEnum(
         "instagram",
         "tiktok",
         "facebook",
@@ -35,7 +35,7 @@ def upgrade() -> None:
         name="social_platform",
         create_type=False,
     )
-    publish_status = sa.Enum(
+    publish_status = PGEnum(
         "queued",
         "publishing",
         "published",
@@ -44,7 +44,7 @@ def upgrade() -> None:
         "provider_not_configured",
         name="publish_status",
     )
-    publish_status_no_create = sa.Enum(
+    publish_status_no_create = PGEnum(
         "queued",
         "publishing",
         "published",
@@ -54,8 +54,8 @@ def upgrade() -> None:
         name="publish_status",
         create_type=False,
     )
-    publish_mode = sa.Enum("now", "scheduled", name="publish_mode")
-    publish_mode_no_create = sa.Enum("now", "scheduled", name="publish_mode", create_type=False)
+    publish_mode = PGEnum("now", "scheduled", name="publish_mode")
+    publish_mode_no_create = PGEnum("now", "scheduled", name="publish_mode", create_type=False)
 
     bind = op.get_bind()
     social_platform.create(bind, checkfirst=True)
