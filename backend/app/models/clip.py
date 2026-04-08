@@ -1,11 +1,13 @@
+import enum
 import uuid
 from datetime import datetime
-from sqlalchemy import String, Float, Text, DateTime, ForeignKey, Enum as SAEnum
-from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.dialects.postgresql import UUID, ARRAY, JSONB
+
+from sqlalchemy import DateTime, Enum as SAEnum, Float, ForeignKey, String, Text
 from sqlalchemy import String as SAString
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.database import Base
-import enum
 
 
 class ClipStatus(str, enum.Enum):
@@ -45,3 +47,6 @@ class Clip(Base):
 
     video: Mapped["Video"] = relationship("Video", back_populates="clips")
     exports: Mapped[list["Export"]] = relationship("Export", back_populates="clip", cascade="all, delete-orphan")
+    publish_jobs: Mapped[list["PublishJob"]] = relationship(
+        "PublishJob", back_populates="clip", cascade="all, delete-orphan"
+    )

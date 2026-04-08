@@ -1,0 +1,151 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+
+import { Card } from "@/components/ui/Card";
+import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
+import { api, ApiError } from "@/lib/api";
+import { ConnectedAccount, SocialProvider } from "@/types";
+
+const statusTextStyles: Record<string, string> = {
+  ready: "text-emerald-300",
+  provider_not_configured: "text-amber-300",
+};
+
+export function ConnectionsPanel() {
+  const searchParams = useSearchParams();
+  const [providers, setProviders] = useState<SocialProvider[]>([]);
+  const [accounts, setAccounts] = useState<ConnectedAccount[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [connectingPlatform, setConnectingPlatform] = useState<string | null>(null);
+  const [disconnectingAccountId, setDisconnectingAccountId] = useState<string | null>(null);
+
+  const callbackMessage = useMemo(() => {
+    const callbackStatus = searchParams.get("status");
+    const platform = searchParams.get("platform");
+    if (!callbackStatus) return null;
+    if (callbackStatus === "connected") return `Connected ${platform || "account"} successfully.`;
+    return `Connection failed${platform ? ` for ${platform}` : ""}.`;
+  }, [searchParams]);
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [providersData, accountsData] = await Promise.all([
+        api.get<SocialProvider[]>("/api/social/providers"),
+        api.get<ConnectedAccount[]>("/api/social/accounts"),
+      ]);
+      setProviders(providersData);
+      setAccounts(accountsData);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to load connections");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const connectPlatform = async (platform: string) => {
+    setConnectingPlatform(platform);
+    setActionError(null);
+    try {
+      const data = await api.post<{ authorization_url: string }>(`/api/social/${platform}/connect`, {
+        return_to: "/connections",
+      });
+      window.location.href = data.authorization_url;
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : "Failed to start connection");
+    } finally {
+      setConnectingPlatform(null);
+    }
+  };
+
+  const disconnectAccount = async (accountId: string) => {
+    setDisconnectingAccountId(accountId);
+    setActionError(null);
+    try {
+      await api.delete(`/api/social/accounts/${accountId}`);
+      await load();
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : "Failed to disconnect account");
+    } finally {
+      setDisconnectingAccountId(null);
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      {callbackMessage ? <p className="text-sm text-emerald-300">{callbackMessage}</p> : null}
+      {actionError ? <p className="text-sm text-red-400">{actionError}</p> : null}
+      {error ? <p className="text-sm text-red-400">{error}</p> : null}
+
+      {loading ? (
+        <div className="inline-flex items-center gap-2 text-sm text-slate-300">
+          <LoadingSpinner size="sm" />
+          Loading connections...
+        </div>
+      ) : null}
+
+      {providers.map((provider) => {
+        const providerAccounts = accounts.filter((account) => account.platform === provider.platform);
+        const setupClass = statusTextStyles[provider.setup_status] || "text-slate-300";
+
+        return (
+          <Card key={provider.platform}>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-white">{provider.display_name}</h3>
+                <p className={`mt-1 text-xs ${setupClass}`}>
+                  {provider.setup_status === "ready" ? "Ready" : provider.setup_message || "Not configured"}
+                </p>
+                <p className="mt-1 text-xs text-slate-500">{provider.connected_account_count} connected account(s)</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void connectPlatform(provider.platform)}
+                disabled={connectingPlatform === provider.platform || provider.setup_status !== "ready"}
+                className="rounded-md bg-[#7C3AED] px-3 py-2 text-sm font-medium text-white hover:bg-[#6D28D9] disabled:opacity-50"
+              >
+                {connectingPlatform === provider.platform ? "Connecting..." : "Connect"}
+              </button>
+            </div>
+
+            {providerAccounts.length > 0 ? (
+              <div className="mt-4 space-y-2">
+                {providerAccounts.map((account) => (
+                  <div key={account.id} className="rounded-md border border-slate-700 bg-slate-900/40 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm text-white">{account.display_name || account.external_account_id}</p>
+                        <p className="mt-1 text-xs text-slate-400">
+                          {account.username_or_channel_name || account.external_account_id}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void disconnectAccount(account.id)}
+                        disabled={disconnectingAccountId === account.id}
+                        className="rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+                      >
+                        {disconnectingAccountId === account.id ? "Disconnecting..." : "Disconnect"}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-4 text-sm text-slate-400">No accounts connected yet.</p>
+            )}
+          </Card>
+        );
+      })}
+    </div>
+  );
+}

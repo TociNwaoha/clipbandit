@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/Button";
+import { ConnectionsSummary } from "@/components/connections/ConnectionsSummary";
 import { UploadModal } from "@/components/upload/UploadModal";
 import { VideoList } from "@/components/videos/VideoList";
 import { useVideos } from "@/hooks/useVideos";
@@ -12,6 +13,8 @@ export function VideosDashboard() {
 
   return (
     <>
+      <ConnectionsSummary />
+
       <div className="mb-6 flex items-center justify-between gap-4">
         <h2 className="text-2xl font-semibold text-white">Videos</h2>
         <Button onClick={() => setIsUploadOpen(true)}>Upload Video</Button>

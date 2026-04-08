@@ -1,10 +1,12 @@
+import enum
 import uuid
 from datetime import datetime
-from sqlalchemy import Integer, Text, DateTime, ForeignKey, Enum as SAEnum, Float
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from sqlalchemy import DateTime, Enum as SAEnum, Float, ForeignKey, Integer, Text
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.database import Base
-import enum
 
 
 class AspectRatio(str, enum.Enum):
@@ -53,12 +55,8 @@ class Export(Base):
         ),
         nullable=False,
     )
-    caption_style: Mapped[CaptionStyle | None] = mapped_column(
-        SAEnum(CaptionStyle, name="caption_style")
-    )
-    caption_format: Mapped[CaptionFormat] = mapped_column(
-        SAEnum(CaptionFormat, name="caption_format"), nullable=False
-    )
+    caption_style: Mapped[CaptionStyle | None] = mapped_column(SAEnum(CaptionStyle, name="caption_style"))
+    caption_format: Mapped[CaptionFormat] = mapped_column(SAEnum(CaptionFormat, name="caption_format"), nullable=False)
     caption_vertical_position: Mapped[float | None] = mapped_column(Float)
     caption_scale: Mapped[float | None] = mapped_column(Float)
     frame_anchor_x: Mapped[float | None] = mapped_column(Float)
@@ -80,3 +78,6 @@ class Export(Base):
 
     clip: Mapped["Clip"] = relationship("Clip", back_populates="exports")
     user: Mapped["User"] = relationship("User", back_populates="exports")
+    publish_jobs: Mapped[list["PublishJob"]] = relationship(
+        "PublishJob", back_populates="export", cascade="all, delete-orphan"
+    )

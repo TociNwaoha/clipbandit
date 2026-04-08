@@ -163,3 +163,82 @@ export interface TranscriptSegment {
   segment_index: number | null;
   created_at: string;
 }
+
+export type SocialPlatform = "instagram" | "tiktok" | "facebook" | "youtube" | "x" | "linkedin";
+
+export interface SocialProviderCapabilities {
+  supports_connect: boolean;
+  supports_publish_now: boolean;
+  supports_schedule: boolean;
+  supports_video_upload: boolean;
+  supports_caption: boolean;
+  supports_title: boolean;
+  supports_description: boolean;
+  supports_hashtags: boolean;
+  supports_privacy: boolean;
+  supports_multiple_accounts: boolean;
+  may_require_user_completion: boolean;
+}
+
+export interface SocialProvider {
+  platform: SocialPlatform;
+  display_name: string;
+  setup_status: string;
+  setup_message: string | null;
+  connected_account_count: number;
+  capabilities: SocialProviderCapabilities;
+}
+
+export interface ConnectedAccount {
+  id: string;
+  user_id: string;
+  platform: SocialPlatform;
+  external_account_id: string;
+  display_name: string | null;
+  username_or_channel_name: string | null;
+  token_expires_at: string | null;
+  scopes: string[] | null;
+  metadata_json: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export type PublishJobStatus =
+  | "queued"
+  | "publishing"
+  | "published"
+  | "failed"
+  | "waiting_user_action"
+  | "provider_not_configured";
+
+export type PublishMode = "now" | "scheduled";
+
+export interface SocialPublishJob {
+  id: string;
+  user_id: string;
+  export_id: string;
+  clip_id: string;
+  platform: SocialPlatform;
+  connected_account_id: string;
+  status: PublishJobStatus;
+  publish_mode: PublishMode;
+  caption: string | null;
+  title: string | null;
+  description: string | null;
+  hashtags: string[] | null;
+  privacy: string | null;
+  scheduled_for: string | null;
+  external_post_id: string | null;
+  external_post_url: string | null;
+  error_message: string | null;
+  provider_metadata_json: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FullVideoExportResponse {
+  clip_id: string;
+  export_id: string;
+  export_status: string;
+  reused_existing_export: boolean;
+}

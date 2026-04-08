@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } 
 
 import { Card } from "@/components/ui/Card";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
+import { SocialPublishPanel } from "@/components/videos/SocialPublishPanel";
 import { api, ApiError } from "@/lib/api";
 import {
   buildCaptionPreviewText,
@@ -22,9 +23,9 @@ interface ClipEditorPanelProps {
 
 const ACTIVE_EXPORT_STATUSES = new Set(["queued", "rendering"]);
 const CAPTION_VERTICAL_MIN = 5;
-const CAPTION_VERTICAL_MAX = 35;
-const CAPTION_SCALE_MIN = 0.7;
-const CAPTION_SCALE_MAX = 1.6;
+const CAPTION_VERTICAL_MAX = 90;
+const CAPTION_SCALE_MIN = 0.25;
+const CAPTION_SCALE_MAX = 2;
 
 const exportStatusStyles: Record<string, string> = {
   queued: "bg-slate-700/80 text-slate-200",
@@ -1161,6 +1162,10 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
             ))}
           </div>
         ) : null}
+      </Card>
+
+      <Card>
+        <SocialPublishPanel exports={exports} />
       </Card>
     </div>
   );

@@ -1,4 +1,5 @@
 from celery import Celery
+
 from app.config import settings
 
 celery_app = Celery(
@@ -10,6 +11,7 @@ celery_app = Celery(
         "app.worker.tasks.transcribe",
         "app.worker.tasks.score",
         "app.worker.tasks.render",
+        "app.worker.tasks.publish",
     ],
 )
 
@@ -25,11 +27,13 @@ celery_app.conf.update(
         "app.worker.tasks.transcribe.*": {"queue": "transcribe"},
         "app.worker.tasks.score.*": {"queue": "score"},
         "app.worker.tasks.render.*": {"queue": "render"},
+        "app.worker.tasks.publish.*": {"queue": "publish"},
     },
     task_queues={
         "ingest": {},
         "transcribe": {},
         "score": {},
         "render": {},
+        "publish": {},
     },
 )

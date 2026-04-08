@@ -29,13 +29,13 @@ def _enum_value(value):
 def _normalize_caption_vertical_position(value: float | None) -> float | None:
     if value is None:
         return None
-    return round(min(35.0, max(5.0, float(value))), 2)
+    return round(min(90.0, max(5.0, float(value))), 2)
 
 
 def _normalize_caption_scale(value: float | None) -> float:
     if value is None:
         return 1.0
-    return round(min(1.6, max(0.7, float(value))), 3)
+    return round(min(2.0, max(0.25, float(value))), 3)
 
 
 def _normalize_frame_anchor(value: float | None) -> float:

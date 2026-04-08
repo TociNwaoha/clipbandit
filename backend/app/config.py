@@ -1,5 +1,6 @@
-from pydantic_settings import BaseSettings
 from functools import lru_cache
+
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -26,6 +27,10 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expiry_hours: int = 24
 
+    # Public URLs
+    backend_public_url: str = "http://localhost:8000"
+    frontend_public_url: str = "http://localhost:3001"
+
     # Cloudflare R2
     r2_account_id: str = "placeholder"
     r2_access_key_id: str = "placeholder"
@@ -34,14 +39,33 @@ class Settings(BaseSettings):
     r2_endpoint_url: str = "https://placeholder.r2.cloudflarestorage.com"
     r2_public_url: str = "placeholder"
 
-    # Anthropic
+    # Anthropic (legacy)
     anthropic_api_key: str = "placeholder"
 
-    # DeepSeek (OpenAI-compatible API)
+    # DeepSeek
     deepseek_api_key: str = "placeholder"
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-chat"
     deepseek_timeout_sec: int = 30
+
+    # Social distribution
+    social_token_encryption_key: str = "placeholder"
+    social_oauth_state_ttl_minutes: int = 15
+
+    youtube_client_id: str = "placeholder"
+    youtube_client_secret: str = "placeholder"
+
+    meta_app_id: str = "placeholder"
+    meta_app_secret: str = "placeholder"
+
+    tiktok_client_key: str = "placeholder"
+    tiktok_client_secret: str = "placeholder"
+
+    x_client_id: str = "placeholder"
+    x_client_secret: str = "placeholder"
+
+    linkedin_client_id: str = "placeholder"
+    linkedin_client_secret: str = "placeholder"
 
     # App
     environment: str = "development"

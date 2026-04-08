@@ -2,11 +2,12 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
-import { VideoListItem } from "@/types";
+import { FullVideoExportResponse, VideoListItem } from "@/types";
 
 interface VideoListProps {
   videos: VideoListItem[];
@@ -61,9 +62,12 @@ function statusLabel(status: string): string {
 }
 
 export function VideoList({ videos, loading, error, onRefresh, onOpenUpload }: VideoListProps) {
+  const router = useRouter();
   const [menuVideoId, setMenuVideoId] = useState<string | null>(null);
   const [deletingVideoId, setDeletingVideoId] = useState<string | null>(null);
+  const [preparingVideoId, setPreparingVideoId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   const sortedVideos = useMemo(
     () => [...videos].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
@@ -74,6 +78,7 @@ export function VideoList({ videos, loading, error, onRefresh, onOpenUpload }: V
     if (deletingVideoId) return;
     setDeletingVideoId(videoId);
     setDeleteError(null);
+    setActionMessage(null);
     try {
       await api.delete(`/api/videos/${videoId}`);
       await onRefresh();
@@ -83,6 +88,27 @@ export function VideoList({ videos, loading, error, onRefresh, onOpenUpload }: V
     } finally {
       setDeletingVideoId(null);
       setMenuVideoId(null);
+    }
+  };
+
+  const handlePrepareFullExport = async (videoId: string) => {
+    if (preparingVideoId) return;
+    setPreparingVideoId(videoId);
+    setDeleteError(null);
+    setActionMessage(null);
+    try {
+      const payload = await api.post<FullVideoExportResponse>(`/api/social/videos/${videoId}/full-export`, {});
+      setActionMessage(
+        payload.reused_existing_export
+          ? "Reused existing full export and opened clip editor."
+          : "Prepared full export and opened clip editor."
+      );
+      router.push(`/videos/${videoId}/clips/${payload.clip_id}`);
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : "Failed to prepare full export";
+      setDeleteError(message);
+    } finally {
+      setPreparingVideoId(null);
     }
   };
 
@@ -122,6 +148,7 @@ export function VideoList({ videos, loading, error, onRefresh, onOpenUpload }: V
 
   return (
     <div className="space-y-4">
+      {actionMessage && <p className="text-sm text-emerald-300">{actionMessage}</p>}
       {deleteError && <p className="text-sm text-red-400">{deleteError}</p>}
       {sortedVideos.map((video) => (
         <Card key={video.id} className="relative">
@@ -145,29 +172,41 @@ export function VideoList({ videos, loading, error, onRefresh, onOpenUpload }: V
               </div>
             </Link>
 
-            <div className="relative">
-              <button
-                className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
-                onClick={() => setMenuVideoId(menuVideoId === video.id ? null : video.id)}
-                aria-label="More options"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                  <circle cx="5" cy="12" r="1.8" fill="currentColor" />
-                  <circle cx="12" cy="12" r="1.8" fill="currentColor" />
-                  <circle cx="19" cy="12" r="1.8" fill="currentColor" />
-                </svg>
-              </button>
-              {menuVideoId === video.id && (
-                <div className="absolute right-0 mt-1 w-28 rounded-lg border border-slate-700 bg-[#0F172A] p-1 shadow-xl">
-                  <button
-                    className="w-full rounded-md px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/10 disabled:opacity-50"
-                    onClick={() => void handleDeleteVideo(video.id)}
-                    disabled={deletingVideoId === video.id}
-                  >
-                    {deletingVideoId === video.id ? "Deleting..." : "Delete"}
-                  </button>
-                </div>
-              )}
+            <div className="flex flex-col items-end gap-2">
+              {video.status === "ready" ? (
+                <button
+                  type="button"
+                  onClick={() => void handlePrepareFullExport(video.id)}
+                  disabled={preparingVideoId === video.id}
+                  className="rounded-md border border-[#7C3AED]/40 bg-[#7C3AED]/10 px-3 py-1.5 text-xs font-medium text-[#C4B5FD] hover:bg-[#7C3AED]/20 disabled:opacity-50"
+                >
+                  {preparingVideoId === video.id ? "Preparing..." : "Prepare Full Export"}
+                </button>
+              ) : null}
+              <div className="relative">
+                <button
+                  className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+                  onClick={() => setMenuVideoId(menuVideoId === video.id ? null : video.id)}
+                  aria-label="More options"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <circle cx="5" cy="12" r="1.8" fill="currentColor" />
+                    <circle cx="12" cy="12" r="1.8" fill="currentColor" />
+                    <circle cx="19" cy="12" r="1.8" fill="currentColor" />
+                  </svg>
+                </button>
+                {menuVideoId === video.id && (
+                  <div className="absolute right-0 mt-1 w-28 rounded-lg border border-slate-700 bg-[#0F172A] p-1 shadow-xl">
+                    <button
+                      className="w-full rounded-md px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/10 disabled:opacity-50"
+                      onClick={() => void handleDeleteVideo(video.id)}
+                      disabled={deletingVideoId === video.id}
+                    >
+                      {deletingVideoId === video.id ? "Deleting..." : "Delete"}
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </Card>
