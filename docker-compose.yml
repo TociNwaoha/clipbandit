@@ -26,9 +26,9 @@ services:
       - "6380:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD} ping | grep PONG"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -84,6 +84,7 @@ services:
     env_file: .env
     environment:
       NEXTAUTH_URL: http://147.93.6.2:3001
+      INTERNAL_API_URL: http://backend:8000
       NEXT_PUBLIC_API_URL: http://147.93.6.2:8000
     depends_on:
       - backend

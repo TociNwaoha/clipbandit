@@ -4,12 +4,11 @@ import { notFound, redirect } from "next/navigation";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { ClipEditorPanel } from "@/components/videos/ClipEditorPanel";
 import { authOptions } from "@/lib/auth";
+import { SERVER_API_URL } from "@/lib/serverApi";
 import { Clip, Export, Video } from "@/types";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
 async function fetchWithAuth(path: string, token: string) {
-  return fetch(`${API_URL}${path}`, {
+  return fetch(`${SERVER_API_URL}${path}`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
