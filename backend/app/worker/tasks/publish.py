@@ -76,6 +76,7 @@ def execute_publish_job(self, publish_job_id: str):
         try:
             adapter = get_adapter(publish_job.platform)
             setup_status, setup_message = adapter.setup_status()
+            setup_details = adapter.setup_details() if hasattr(adapter, "setup_details") else {}
             if not encryption_available() or setup_status != "ready":
                 message = (
                     "SOCIAL_TOKEN_ENCRYPTION_KEY is not configured"
@@ -84,6 +85,10 @@ def execute_publish_job(self, publish_job_id: str):
                 )
                 publish_job.status = PublishStatus.provider_not_configured
                 publish_job.error_message = message
+                publish_job.provider_metadata_json = {
+                    **(publish_job.provider_metadata_json or {}),
+                    "provider_setup": setup_details if isinstance(setup_details, dict) else {},
+                }
                 attempt.error_message = message
                 attempt.finished_at = datetime.now(timezone.utc)
                 db.commit()

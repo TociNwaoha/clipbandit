@@ -28,6 +28,21 @@ docker-compose up --build
 
 Default login: `admin@clipbandit.com` / `changeme123`
 
+## YouTube OAuth Provider Config
+
+To enable real YouTube social connection flow:
+
+- Set `YOUTUBE_CLIENT_ID`
+- Set `YOUTUBE_CLIENT_SECRET`
+- Set `SOCIAL_TOKEN_ENCRYPTION_KEY` (required for encrypted token storage)
+- Set `BACKEND_PUBLIC_URL` to your externally reachable backend URL
+
+Google Cloud OAuth redirect URI must match:
+
+- `{BACKEND_PUBLIC_URL}/api/social/youtube/callback`
+
+If any required field is missing/invalid, `/api/social/providers` returns YouTube as `provider_not_configured` with missing-field diagnostics.
+
 ## 10-Prompt Build Plan
 
 1. **Foundation** — Docker, DB schema, auth, skeleton UI (this prompt)

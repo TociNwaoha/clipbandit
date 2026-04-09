@@ -26,6 +26,7 @@ class SocialProviderResponse(BaseModel):
     display_name: str
     setup_status: str
     setup_message: str | None = None
+    setup_details: dict | None = None
     connected_account_count: int
     capabilities: ProviderCapabilitiesResponse
 

@@ -50,6 +50,14 @@ def _callback_url(platform: SocialPlatform) -> str:
     return f"{settings.backend_public_url.rstrip('/')}/api/social/{platform.value}/callback"
 
 
+def _provider_setup(adapter) -> tuple[str, str | None, dict]:
+    setup_status, setup_message = adapter.setup_status()
+    setup_details = adapter.setup_details() if hasattr(adapter, "setup_details") else {}
+    if not isinstance(setup_details, dict):
+        setup_details = {}
+    return setup_status, setup_message, setup_details
+
+
 def _safe_return_path(return_to: str | None) -> str:
     if not return_to:
         return "/connections"
@@ -188,13 +196,16 @@ async def list_social_providers(
     )
     counts = {platform.value: count for platform, count in counts_result.all()}
 
-    encryption_ready = encryption_available()
     items: list[SocialProviderResponse] = []
     for adapter in all_adapters():
-        setup_status, setup_message = adapter.setup_status()
-        if not encryption_ready:
-            setup_status = "provider_not_configured"
-            setup_message = "SOCIAL_TOKEN_ENCRYPTION_KEY is not configured"
+        setup_status, setup_message, setup_details = _provider_setup(adapter)
+
+        logger.info(
+            "[social] provider readiness platform=%s status=%s missing_fields=%s",
+            adapter.platform.value,
+            setup_status,
+            setup_details.get("missing_fields", []),
+        )
 
         caps = adapter.capabilities()
         items.append(
@@ -203,6 +214,7 @@ async def list_social_providers(
                 display_name=adapter.display_name,
                 setup_status=setup_status,
                 setup_message=setup_message,
+                setup_details=setup_details,
                 connected_account_count=counts.get(adapter.platform.value, 0),
                 capabilities=ProviderCapabilitiesResponse(**caps.__dict__),
             )
@@ -230,12 +242,14 @@ async def start_connect(
     body: ConnectStartRequest,
     current_user: User = Depends(get_current_user),
 ):
-    if not encryption_available():
-        raise HTTPException(status_code=503, detail="SOCIAL_TOKEN_ENCRYPTION_KEY is not configured")
-
     adapter = get_adapter(platform)
-    setup_status, setup_message = adapter.setup_status()
+    setup_status, setup_message, setup_details = _provider_setup(adapter)
     if setup_status != "ready":
+        logger.warning(
+            "[social] connect blocked platform=%s missing_fields=%s",
+            platform.value,
+            setup_details.get("missing_fields", []),
+        )
         raise HTTPException(status_code=400, detail=setup_message or "Provider is not configured")
 
     return_to = _safe_return_path(body.return_to)
@@ -394,11 +408,11 @@ async def create_publish_jobs(
         mode = PublishMode.scheduled if scheduled_for and scheduled_for > datetime.now(timezone.utc) else PublishMode.now
 
         adapter = get_adapter(target.platform)
-        setup_status, setup_message = adapter.setup_status()
+        setup_status, setup_message, setup_details = _provider_setup(adapter)
         initial_status = PublishStatus.queued
         initial_error = None
 
-        if not encryption_ready:
+        if not encryption_ready and setup_status == "ready":
             initial_status = PublishStatus.provider_not_configured
             initial_error = "SOCIAL_TOKEN_ENCRYPTION_KEY is not configured"
         elif setup_status != "ready":
@@ -420,7 +434,10 @@ async def create_publish_jobs(
             privacy=content["privacy"],
             scheduled_for=scheduled_for,
             error_message=initial_error,
-            provider_metadata_json={"initial_setup_status": setup_status},
+            provider_metadata_json={
+                "initial_setup_status": setup_status,
+                "provider_setup": setup_details,
+            },
         )
         db.add(publish_job)
         created_jobs.append(publish_job)
@@ -491,7 +508,7 @@ async def retry_publish_job(
         raise HTTPException(status_code=400, detail="Only failed or blocked publish jobs can be retried")
 
     adapter = get_adapter(publish_job.platform)
-    setup_status, setup_message = adapter.setup_status()
+    setup_status, setup_message, setup_details = _provider_setup(adapter)
 
     if not encryption_available() or setup_status != "ready":
         publish_job.status = PublishStatus.provider_not_configured
@@ -500,6 +517,10 @@ async def retry_publish_job(
             if not encryption_available()
             else (setup_message or "Provider is not configured")
         )
+        publish_job.provider_metadata_json = {
+            **(publish_job.provider_metadata_json or {}),
+            "provider_setup": setup_details,
+        }
         await db.commit()
         await db.refresh(publish_job)
         return publish_job

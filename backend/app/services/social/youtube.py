@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from datetime import timedelta
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import httpx
 
@@ -41,10 +41,46 @@ class YouTubeAdapter(SocialProviderAdapter):
             may_require_user_completion=False,
         )
 
+    def setup_details(self) -> dict:
+        missing_fields: list[str] = []
+
+        if is_placeholder(settings.youtube_client_id):
+            missing_fields.append("YOUTUBE_CLIENT_ID")
+        if is_placeholder(settings.youtube_client_secret):
+            missing_fields.append("YOUTUBE_CLIENT_SECRET")
+        if is_placeholder(settings.social_token_encryption_key):
+            missing_fields.append("SOCIAL_TOKEN_ENCRYPTION_KEY")
+
+        callback_url: str | None = None
+        callback_error: str | None = None
+        backend_public_url = (settings.backend_public_url or "").strip()
+        if is_placeholder(backend_public_url):
+            missing_fields.append("BACKEND_PUBLIC_URL")
+            callback_error = "BACKEND_PUBLIC_URL is missing"
+        else:
+            parsed = urlparse(backend_public_url)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                missing_fields.append("BACKEND_PUBLIC_URL")
+                callback_error = "BACKEND_PUBLIC_URL must be an absolute http(s) URL"
+            else:
+                callback_url = f"{backend_public_url.rstrip('/')}/api/social/{self.platform.value}/callback"
+
+        missing_fields = sorted(set(missing_fields))
+        configured = len(missing_fields) == 0
+        message = None if configured else f"Missing/invalid required config: {', '.join(missing_fields)}"
+        return {
+            "configured": configured,
+            "missing_fields": missing_fields,
+            "message": message,
+            "callback_url": callback_url,
+            "callback_error": callback_error,
+        }
+
     def setup_status(self) -> tuple[str, str | None]:
-        if is_placeholder(settings.youtube_client_id) or is_placeholder(settings.youtube_client_secret):
-            return "provider_not_configured", "YOUTUBE_CLIENT_ID and YOUTUBE_CLIENT_SECRET are required"
-        return "ready", None
+        details = self.setup_details()
+        if details["configured"]:
+            return "ready", None
+        return "provider_not_configured", details["message"]
 
     def build_connect_url(self, *, state: str, redirect_uri: str) -> str:
         status, message = self.setup_status()

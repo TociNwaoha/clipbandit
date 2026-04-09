@@ -38,6 +38,14 @@ class SocialProviderAdapter(ABC):
     def setup_status(self) -> tuple[str, str | None]:
         raise NotImplementedError
 
+    def setup_details(self) -> dict:
+        status, message = self.setup_status()
+        return {
+            "configured": status == "ready",
+            "missing_fields": [],
+            "message": message,
+        }
+
     @abstractmethod
     def build_connect_url(self, *, state: str, redirect_uri: str) -> str:
         raise NotImplementedError

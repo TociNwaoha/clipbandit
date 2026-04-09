@@ -185,6 +185,7 @@ export interface SocialProvider {
   display_name: string;
   setup_status: string;
   setup_message: string | null;
+  setup_details?: Record<string, unknown> | null;
   connected_account_count: number;
   capabilities: SocialProviderCapabilities;
 }
