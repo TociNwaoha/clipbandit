@@ -16,6 +16,7 @@ from app.services.social.types import OAuthAccountPayload, ProviderCapabilities,
 YOUTUBE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 YOUTUBE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 YOUTUBE_CHANNELS_URL = "https://www.googleapis.com/youtube/v3/channels"
+YOUTUBE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
 YOUTUBE_UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/videos"
 
 YOUTUBE_SCOPES = [
@@ -45,6 +46,17 @@ def _extract_google_error(response: httpx.Response) -> str:
 
     # Fall back to status only; do not include sensitive payloads.
     return f"http_{response.status_code}"
+
+
+def _http_error_endpoint(exc: httpx.HTTPStatusError) -> str:
+    path = exc.request.url.path or ""
+    if path.endswith("/token"):
+        return "token_exchange"
+    if "youtube/v3/channels" in path:
+        return "channel_lookup"
+    if "oauth2" in path and "userinfo" in path:
+        return "userinfo_lookup"
+    return "google_api"
 
 
 class YouTubeAdapter(SocialProviderAdapter):
@@ -148,16 +160,63 @@ class YouTubeAdapter(SocialProviderAdapter):
                     raise ProviderOperationError("YouTube OAuth response missing access token")
 
                 headers = {"Authorization": f"Bearer {access_token}"}
-                channels_resp = client.get(
-                    YOUTUBE_CHANNELS_URL,
-                    headers=headers,
-                    params={"part": "id,snippet", "mine": "true"},
-                )
-                channels_resp.raise_for_status()
-                channels_data = channels_resp.json()
+                metadata_json: dict = {}
+                external_account_id = "youtube-account"
+                display_name = None
+                username_or_channel_name = None
+
+                try:
+                    channels_resp = client.get(
+                        YOUTUBE_CHANNELS_URL,
+                        headers=headers,
+                        params={"part": "id,snippet", "mine": "true"},
+                    )
+                    channels_resp.raise_for_status()
+                    channels_data = channels_resp.json()
+                    channel_item = (channels_data.get("items") or [None])[0] or {}
+                    snippet = channel_item.get("snippet") or {}
+                    external_account_id = str(
+                        channel_item.get("id") or snippet.get("customUrl") or "youtube-account"
+                    )
+                    display_name = snippet.get("title")
+                    username_or_channel_name = snippet.get("customUrl")
+                    metadata_json = {"channel": channel_item}
+                except httpx.HTTPStatusError as channel_exc:
+                    channel_reason = _extract_google_error(channel_exc.response)
+                    if (
+                        channel_exc.response.status_code == 403
+                        and "insufficient authentication scopes" in channel_reason.lower()
+                    ):
+                        logging.warning(
+                            "[social] youtube oauth channel lookup fallback reason=%s",
+                            channel_reason,
+                        )
+                        userinfo_resp = client.get(YOUTUBE_USERINFO_URL, headers=headers)
+                        userinfo_resp.raise_for_status()
+                        userinfo_data = userinfo_resp.json()
+                        external_account_id = str(
+                            userinfo_data.get("sub")
+                            or userinfo_data.get("id")
+                            or "youtube-account"
+                        )
+                        display_name = userinfo_data.get("name")
+                        username_or_channel_name = userinfo_data.get("given_name")
+                        metadata_json = {
+                            "userinfo": {
+                                "sub": userinfo_data.get("sub"),
+                                "name": userinfo_data.get("name"),
+                                "given_name": userinfo_data.get("given_name"),
+                            },
+                            "channel_lookup": {
+                                "status": "skipped_insufficient_scopes",
+                                "reason": channel_reason,
+                            },
+                        }
+                    else:
+                        raise
         except httpx.HTTPStatusError as exc:
             api_error = _extract_google_error(exc.response)
-            endpoint = "token_exchange" if exc.request.url.path.endswith("/token") else "channel_lookup"
+            endpoint = _http_error_endpoint(exc)
             logging.warning(
                 "[social] youtube oauth http error endpoint=%s status=%s reason=%s",
                 endpoint,
@@ -169,10 +228,6 @@ class YouTubeAdapter(SocialProviderAdapter):
             logging.warning("[social] youtube oauth network error: %s", exc.__class__.__name__)
             raise ProviderOperationError("YouTube OAuth request failed. Please retry.") from exc
 
-        channel_item = (channels_data.get("items") or [None])[0] or {}
-        snippet = channel_item.get("snippet") or {}
-        external_account_id = str(channel_item.get("id") or snippet.get("customUrl") or "youtube-account")
-
         expires_in = token_data.get("expires_in")
         token_expires_at = None
         if isinstance(expires_in, (int, float)):
@@ -183,13 +238,13 @@ class YouTubeAdapter(SocialProviderAdapter):
 
         return OAuthAccountPayload(
             external_account_id=external_account_id,
-            display_name=snippet.get("title"),
-            username_or_channel_name=snippet.get("customUrl"),
+            display_name=display_name,
+            username_or_channel_name=username_or_channel_name,
             access_token=access_token,
             refresh_token=token_data.get("refresh_token"),
             token_expires_at=token_expires_at,
             scopes=scopes,
-            metadata_json={"channel": channel_item},
+            metadata_json=metadata_json,
         )
 
     def _refresh_access_token(self, refresh_token: str) -> tuple[str, str | None]:
