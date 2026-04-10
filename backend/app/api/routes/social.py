@@ -303,8 +303,24 @@ async def oauth_callback(
             encrypt_secret(oauth_payload.refresh_token) if oauth_payload.refresh_token else None
         )
     except (ProviderOperationError, ProviderNotConfiguredError, CryptoConfigError) as exc:
-        logger.warning("[social] callback failed platform=%s error=%s", platform.value, exc)
-        return RedirectResponse(f"{target_base}?status=error&platform={platform.value}&message=connect_failed")
+        logger.warning(
+            "[social] callback failed platform=%s user_id=%s reason=%s",
+            platform.value,
+            user_id,
+            str(exc),
+        )
+        return RedirectResponse(
+            f"{target_base}?status=error&platform={platform.value}&message=oauth_exchange_failed"
+        )
+    except Exception:
+        logger.exception(
+            "[social] callback unexpected failure platform=%s user_id=%s",
+            platform.value,
+            user_id,
+        )
+        return RedirectResponse(
+            f"{target_base}?status=error&platform={platform.value}&message=internal_callback_error"
+        )
 
     existing_result = await db.execute(
         select(ConnectedAccount).where(

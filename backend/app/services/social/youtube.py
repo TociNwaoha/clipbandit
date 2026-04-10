@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
+import logging
 from datetime import timedelta
 from urllib.parse import urlencode, urlparse
 
@@ -20,6 +22,29 @@ YOUTUBE_SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/userinfo.profile",
 ]
+
+logger = logging.getLogger(__name__)
+
+
+def _extract_google_error(response: httpx.Response) -> str:
+    """Return a short, non-sensitive Google OAuth/API error summary."""
+    try:
+        payload = response.json()
+    except (ValueError, json.JSONDecodeError):
+        payload = {}
+
+    if isinstance(payload, dict):
+        if isinstance(payload.get("error"), str):
+            detail = payload.get("error_description") or payload.get("error")
+            return str(detail)[:200]
+        err_obj = payload.get("error")
+        if isinstance(err_obj, dict):
+            detail = err_obj.get("message") or err_obj.get("status") or err_obj.get("code")
+            if detail:
+                return str(detail)[:200]
+
+    # Fall back to status only; do not include sensitive payloads.
+    return f"http_{response.status_code}"
 
 
 class YouTubeAdapter(SocialProviderAdapter):
@@ -112,23 +137,37 @@ class YouTubeAdapter(SocialProviderAdapter):
             "grant_type": "authorization_code",
         }
 
-        with httpx.Client(timeout=30) as client:
-            token_resp = client.post(YOUTUBE_TOKEN_URL, data=token_payload)
-            token_resp.raise_for_status()
-            token_data = token_resp.json()
+        try:
+            with httpx.Client(timeout=30) as client:
+                token_resp = client.post(YOUTUBE_TOKEN_URL, data=token_payload)
+                token_resp.raise_for_status()
+                token_data = token_resp.json()
 
-            access_token = token_data.get("access_token")
-            if not access_token:
-                raise ProviderOperationError("YouTube OAuth response missing access token")
+                access_token = token_data.get("access_token")
+                if not access_token:
+                    raise ProviderOperationError("YouTube OAuth response missing access token")
 
-            headers = {"Authorization": f"Bearer {access_token}"}
-            channels_resp = client.get(
-                YOUTUBE_CHANNELS_URL,
-                headers=headers,
-                params={"part": "id,snippet", "mine": "true"},
+                headers = {"Authorization": f"Bearer {access_token}"}
+                channels_resp = client.get(
+                    YOUTUBE_CHANNELS_URL,
+                    headers=headers,
+                    params={"part": "id,snippet", "mine": "true"},
+                )
+                channels_resp.raise_for_status()
+                channels_data = channels_resp.json()
+        except httpx.HTTPStatusError as exc:
+            api_error = _extract_google_error(exc.response)
+            endpoint = "token_exchange" if exc.request.url.path.endswith("/token") else "channel_lookup"
+            logger.warning(
+                "[social] youtube oauth http error endpoint=%s status=%s reason=%s",
+                endpoint,
+                exc.response.status_code,
+                api_error,
             )
-            channels_resp.raise_for_status()
-            channels_data = channels_resp.json()
+            raise ProviderOperationError(f"YouTube OAuth failed: {api_error}") from exc
+        except httpx.RequestError as exc:
+            logger.warning("[social] youtube oauth network error: %s", exc.__class__.__name__)
+            raise ProviderOperationError("YouTube OAuth request failed. Please retry.") from exc
 
         channel_item = (channels_data.get("items") or [None])[0] or {}
         snippet = channel_item.get("snippet") or {}
