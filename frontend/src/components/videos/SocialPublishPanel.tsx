@@ -502,6 +502,11 @@ export function SocialPublishPanel({ exports }: SocialPublishPanelProps) {
                     ? `${platformAccounts.length} account(s) connected`
                     : "No connected accounts. Connect one first."}
               </p>
+              {platform === "x" ? (
+                <p className="mt-1 text-xs text-amber-300">
+                  X is text-only in this pass. Media/video upload is deferred.
+                </p>
+              ) : null}
 
               <div className="mt-3 grid gap-3 md:grid-cols-2">
                 <label className="text-xs text-slate-400">

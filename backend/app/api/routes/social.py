@@ -31,8 +31,15 @@ from app.schemas.social import (
     SocialProviderResponse,
 )
 from app.services.crypto import CryptoConfigError, decrypt_secret, encrypt_secret, encryption_available
+from app.services.social.oauth_state import (
+    OAuthStateError,
+    consume_pkce_verifier,
+    discard_pkce_verifier,
+    store_pkce_verifier,
+)
 from app.services.social import all_adapters, get_adapter
 from app.services.social.base import ProviderNotConfiguredError, ProviderOperationError
+from app.services.social.x import build_pkce_challenge, generate_pkce_verifier
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -68,21 +75,23 @@ def _safe_return_path(return_to: str | None) -> str:
     return return_to
 
 
-def _make_state_token(user_id: uuid.UUID, platform: SocialPlatform, return_to: str) -> str:
+def _make_state_token(user_id: uuid.UUID, platform: SocialPlatform, return_to: str) -> tuple[str, str]:
     now = datetime.now(timezone.utc)
     exp = now + timedelta(minutes=settings.social_oauth_state_ttl_minutes)
+    nonce = str(uuid.uuid4())
     payload = {
         "sub": str(user_id),
         "platform": platform.value,
         "return_to": return_to,
-        "nonce": str(uuid.uuid4()),
+        "nonce": nonce,
         "iat": int(now.timestamp()),
         "exp": int(exp.timestamp()),
     }
-    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    token = jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    return token, nonce
 
 
-def _parse_state_token(token: str, expected_platform: SocialPlatform) -> tuple[uuid.UUID, str]:
+def _parse_state_token(token: str, expected_platform: SocialPlatform) -> tuple[uuid.UUID, str, str]:
     try:
         payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
         platform = payload.get("platform")
@@ -90,7 +99,10 @@ def _parse_state_token(token: str, expected_platform: SocialPlatform) -> tuple[u
             raise HTTPException(status_code=400, detail="Invalid OAuth state platform")
         user_id = uuid.UUID(payload.get("sub"))
         return_to = _safe_return_path(payload.get("return_to"))
-        return user_id, return_to
+        nonce = str(payload.get("nonce") or "").strip()
+        if not nonce:
+            raise HTTPException(status_code=400, detail="Invalid OAuth state nonce")
+        return user_id, return_to, nonce
     except JWTError as exc:
         raise HTTPException(status_code=400, detail="Invalid OAuth state") from exc
     except ValueError as exc:
@@ -253,11 +265,38 @@ async def start_connect(
         raise HTTPException(status_code=400, detail=setup_message or "Provider is not configured")
 
     return_to = _safe_return_path(body.return_to)
-    state = _make_state_token(current_user.id, platform, return_to)
+    state, nonce = _make_state_token(current_user.id, platform, return_to)
+    oauth_context: dict | None = None
+
+    if platform == SocialPlatform.x:
+        code_verifier = generate_pkce_verifier()
+        code_challenge = build_pkce_challenge(code_verifier)
+        ttl_seconds = max(60, int(settings.social_oauth_state_ttl_minutes) * 60)
+        try:
+            await store_pkce_verifier(
+                platform=platform,
+                user_id=str(current_user.id),
+                nonce=nonce,
+                code_verifier=code_verifier,
+                ttl_seconds=ttl_seconds,
+            )
+        except OAuthStateError as exc:
+            logger.warning("[social] connect failed platform=%s reason=%s", platform.value, exc)
+            raise HTTPException(status_code=500, detail="Could not initialize OAuth session") from exc
+        oauth_context = {"code_challenge": code_challenge}
 
     try:
-        authorization_url = adapter.build_connect_url(state=state, redirect_uri=_callback_url(platform))
+        if platform == SocialPlatform.x:
+            authorization_url = adapter.build_connect_url(
+                state=state,
+                redirect_uri=_callback_url(platform),
+                oauth_context=oauth_context,
+            )
+        else:
+            authorization_url = adapter.build_connect_url(state=state, redirect_uri=_callback_url(platform))
     except ProviderOperationError as exc:
+        if platform == SocialPlatform.x:
+            await discard_pkce_verifier(platform=platform, nonce=nonce)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return ConnectStartResponse(authorization_url=authorization_url)
@@ -278,26 +317,54 @@ async def oauth_callback(
         return RedirectResponse(f"{frontend_base}/connections?status=error&message=missing_state")
 
     try:
-        user_id, return_path = _parse_state_token(state, platform)
+        user_id, return_path, nonce = _parse_state_token(state, platform)
     except HTTPException:
         return RedirectResponse(f"{frontend_base}/connections?status=error&message=invalid_state")
 
     target_base = f"{frontend_base}{return_path}"
 
     if error:
+        if platform == SocialPlatform.x:
+            await discard_pkce_verifier(platform=platform, nonce=nonce)
         return RedirectResponse(f"{target_base}?status=error&platform={platform.value}&message={error}")
 
     if not code:
+        if platform == SocialPlatform.x:
+            await discard_pkce_verifier(platform=platform, nonce=nonce)
         return RedirectResponse(f"{target_base}?status=error&platform={platform.value}&message=missing_code")
 
     if not encryption_available():
+        if platform == SocialPlatform.x:
+            await discard_pkce_verifier(platform=platform, nonce=nonce)
         return RedirectResponse(
             f"{target_base}?status=error&platform={platform.value}&message=encryption_not_configured"
         )
 
     adapter = get_adapter(platform)
+    oauth_context: dict | None = None
+    if platform == SocialPlatform.x:
+        try:
+            code_verifier = await consume_pkce_verifier(
+                platform=platform,
+                user_id=str(user_id),
+                nonce=nonce,
+            )
+        except OAuthStateError as exc:
+            logger.warning("[social] callback pkce verification failed platform=%s reason=%s", platform.value, exc)
+            return RedirectResponse(
+                f"{target_base}?status=error&platform={platform.value}&message=oauth_session_expired"
+            )
+        oauth_context = {"code_verifier": code_verifier}
+
     try:
-        oauth_payload = adapter.exchange_code(code=code, redirect_uri=_callback_url(platform))
+        if platform == SocialPlatform.x:
+            oauth_payload = adapter.exchange_code(
+                code=code,
+                redirect_uri=_callback_url(platform),
+                oauth_context=oauth_context,
+            )
+        else:
+            oauth_payload = adapter.exchange_code(code=code, redirect_uri=_callback_url(platform))
         access_token_encrypted = encrypt_secret(oauth_payload.access_token)
         refresh_token_encrypted = (
             encrypt_secret(oauth_payload.refresh_token) if oauth_payload.refresh_token else None

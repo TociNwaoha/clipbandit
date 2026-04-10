@@ -26,8 +26,20 @@ export function ConnectionsPanel() {
   const callbackMessage = useMemo(() => {
     const callbackStatus = searchParams.get("status");
     const platform = searchParams.get("platform");
+    const reason = searchParams.get("message");
     if (!callbackStatus) return null;
-    if (callbackStatus === "connected") return `Connected ${platform || "account"} successfully.`;
+    const target = platform || "account";
+    if (callbackStatus === "connected") return `Connected ${target} successfully.`;
+
+    if (reason === "oauth_session_expired") {
+      return `Connection failed for ${target}: session expired. Start connect again.`;
+    }
+    if (reason === "oauth_exchange_failed") {
+      return `Connection failed for ${target}: OAuth exchange was rejected by provider.`;
+    }
+    if (reason === "internal_callback_error") {
+      return `Connection failed for ${target}: callback processing error.`;
+    }
     return `Connection failed${platform ? ` for ${platform}` : ""}.`;
   }, [searchParams]);
 

@@ -43,6 +43,24 @@ Google Cloud OAuth redirect URI must match:
 
 If any required field is missing/invalid, `/api/social/providers` returns YouTube as `provider_not_configured` with missing-field diagnostics.
 
+## X (Twitter) OAuth Provider Config
+
+To enable real X connection + text posting flow:
+
+- Set `X_CLIENT_ID`
+- Set `X_CLIENT_SECRET`
+- Set `SOCIAL_TOKEN_ENCRYPTION_KEY` (required for encrypted token storage)
+- Set `BACKEND_PUBLIC_URL` to your externally reachable backend URL
+
+X developer app callback URI must match:
+
+- `{BACKEND_PUBLIC_URL}/api/social/x/callback`
+
+Notes:
+
+- X posting is text-only in this pass (media/video upload is deferred).
+- If X does not return a usable refresh token, connection/publish fails honestly and requires reconnect.
+
 ## 10-Prompt Build Plan
 
 1. **Foundation** — Docker, DB schema, auth, skeleton UI (this prompt)
