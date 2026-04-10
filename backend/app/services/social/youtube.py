@@ -23,7 +23,7 @@ YOUTUBE_SCOPES = [
     "https://www.googleapis.com/auth/userinfo.profile",
 ]
 
-logger = logging.getLogger("uvicorn.error")
+logger = logging.getLogger(__name__)
 
 
 def _extract_google_error(response: httpx.Response) -> str:
@@ -158,7 +158,7 @@ class YouTubeAdapter(SocialProviderAdapter):
         except httpx.HTTPStatusError as exc:
             api_error = _extract_google_error(exc.response)
             endpoint = "token_exchange" if exc.request.url.path.endswith("/token") else "channel_lookup"
-            logger.warning(
+            logging.warning(
                 "[social] youtube oauth http error endpoint=%s status=%s reason=%s",
                 endpoint,
                 exc.response.status_code,
@@ -166,7 +166,7 @@ class YouTubeAdapter(SocialProviderAdapter):
             )
             raise ProviderOperationError(f"YouTube OAuth failed: {api_error}") from exc
         except httpx.RequestError as exc:
-            logger.warning("[social] youtube oauth network error: %s", exc.__class__.__name__)
+            logging.warning("[social] youtube oauth network error: %s", exc.__class__.__name__)
             raise ProviderOperationError("YouTube OAuth request failed. Please retry.") from exc
 
         channel_item = (channels_data.get("items") or [None])[0] or {}

@@ -35,7 +35,7 @@ from app.services.social import all_adapters, get_adapter
 from app.services.social.base import ProviderNotConfiguredError, ProviderOperationError
 
 router = APIRouter()
-logger = logging.getLogger("uvicorn.error")
+logger = logging.getLogger(__name__)
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
@@ -303,7 +303,7 @@ async def oauth_callback(
             encrypt_secret(oauth_payload.refresh_token) if oauth_payload.refresh_token else None
         )
     except (ProviderOperationError, ProviderNotConfiguredError, CryptoConfigError) as exc:
-        logger.warning(
+        logging.warning(
             "[social] callback failed platform=%s user_id=%s reason=%s",
             platform.value,
             user_id,
@@ -313,7 +313,7 @@ async def oauth_callback(
             f"{target_base}?status=error&platform={platform.value}&message=oauth_exchange_failed"
         )
     except Exception:
-        logger.exception(
+        logging.exception(
             "[social] callback unexpected failure platform=%s user_id=%s",
             platform.value,
             user_id,
