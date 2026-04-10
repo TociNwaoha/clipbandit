@@ -35,7 +35,7 @@ from app.services.social import all_adapters, get_adapter
 from app.services.social.base import ProviderNotConfiguredError, ProviderOperationError
 
 router = APIRouter()
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn.error")
 
 
 def _as_utc(value: datetime | None) -> datetime | None:

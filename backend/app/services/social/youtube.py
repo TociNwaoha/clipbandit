@@ -23,7 +23,7 @@ YOUTUBE_SCOPES = [
     "https://www.googleapis.com/auth/userinfo.profile",
 ]
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn.error")
 
 
 def _extract_google_error(response: httpx.Response) -> str:
