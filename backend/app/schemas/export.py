@@ -51,3 +51,14 @@ class ExportResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class PublicExportShareResponse(BaseModel):
+    export_id: uuid.UUID
+    clip_id: uuid.UUID
+    video_id: uuid.UUID
+    title: str
+    description: str
+    thumbnail_url: str | None
+    media_url: str
+    share_url: str

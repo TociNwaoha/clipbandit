@@ -31,6 +31,7 @@ FACEBOOK_SCOPES = [
 ]
 
 FACEBOOK_PAGE_FIELDS = "id,name,category,link,picture{url},access_token,tasks"
+FACEBOOK_ACCOUNT_FIELDS = "id,name,link,picture{url}"
 
 
 def _graph_base() -> str:
@@ -62,6 +63,24 @@ def _normalize_page_metadata(page: dict) -> dict:
             "name": page.get("name"),
             "category": page.get("category"),
             "link": page.get("link"),
+        },
+    }
+
+
+def _normalize_account_metadata(account: dict) -> dict:
+    picture = account.get("picture") if isinstance(account, dict) else None
+    picture_data = picture.get("data") if isinstance(picture, dict) else None
+    return {
+        "provider_family": "meta",
+        "destination_type": "facebook_account",
+        "destination_id": account.get("id"),
+        "destination_name": account.get("name"),
+        "link": account.get("link"),
+        "profile_picture_url": picture_data.get("url") if isinstance(picture_data, dict) else None,
+        "account": {
+            "id": account.get("id"),
+            "name": account.get("name"),
+            "link": account.get("link"),
         },
     }
 
@@ -98,7 +117,7 @@ class FacebookAdapter(SocialProviderAdapter):
         )
 
     def setup_details(self) -> dict:
-        return build_provider_setup_details(
+        details = build_provider_setup_details(
             platform_value=self.platform.value,
             primary_id_attr="facebook_app_id",
             primary_secret_attr="facebook_app_secret",
@@ -106,6 +125,14 @@ class FacebookAdapter(SocialProviderAdapter):
             notes="Publishes to Facebook Pages only (not personal profiles).",
             supports_publish=True,
         )
+        details.update(
+            {
+                "supports_page_auto_publish": True,
+                "supports_profile_auto_publish": False,
+                "supports_profile_manual_share": True,
+            }
+        )
+        return details
 
     def setup_status(self) -> tuple[str, str | None]:
         details = self.setup_details()
@@ -154,6 +181,7 @@ class FacebookAdapter(SocialProviderAdapter):
 
         token_expires_at = None
         accounts: list[OAuthAccountPayload] = []
+        pages_count = 0
 
         try:
             with httpx.Client(timeout=30) as client:
@@ -176,6 +204,15 @@ class FacebookAdapter(SocialProviderAdapter):
                 if isinstance(expires_in, (int, float)):
                     token_expires_at = utcnow() + timedelta(seconds=int(expires_in))
 
+                account_data = graph_get(
+                    client,
+                    url=f"{_graph_base()}/me",
+                    params={
+                        "fields": FACEBOOK_ACCOUNT_FIELDS,
+                        "access_token": access_token,
+                    },
+                )
+
                 pages_data = graph_get(
                     client,
                     url=f"{_graph_base()}/me/accounts",
@@ -187,11 +224,29 @@ class FacebookAdapter(SocialProviderAdapter):
         except GraphRequestError as exc:
             raise ProviderOperationError(f"Facebook OAuth failed: {exc}") from exc
 
-        rows = pages_data.get("data")
-        if not isinstance(rows, list) or not rows:
+        account_id = str(account_data.get("id") or "").strip()
+        if not account_id:
             raise ProviderOperationError(
-                "Facebook OAuth completed, but no publishable Pages were returned."
+                "Facebook OAuth completed, but account identity was not returned."
             )
+
+        account_name = str(account_data.get("name") or "").strip() or None
+        accounts.append(
+            OAuthAccountPayload(
+                external_account_id=account_id,
+                display_name=account_name,
+                username_or_channel_name=account_name,
+                access_token=access_token,
+                refresh_token=None,
+                token_expires_at=token_expires_at,
+                scopes=list(FACEBOOK_SCOPES),
+                metadata_json=_normalize_account_metadata(account_data),
+            )
+        )
+
+        rows = pages_data.get("data")
+        if not isinstance(rows, list):
+            rows = []
 
         for page in rows:
             if not isinstance(page, dict):
@@ -203,6 +258,7 @@ class FacebookAdapter(SocialProviderAdapter):
 
             page_name = str(page.get("name") or "").strip() or None
             metadata = _normalize_page_metadata(page)
+            metadata["source_account_external_id"] = account_id
             accounts.append(
                 OAuthAccountPayload(
                     external_account_id=page_id,
@@ -215,15 +271,15 @@ class FacebookAdapter(SocialProviderAdapter):
                     metadata_json=metadata,
                 )
             )
-
-        if not accounts:
-            raise ProviderOperationError(
-                "Facebook OAuth completed, but no Page access tokens were returned."
-            )
+            pages_count += 1
 
         return OAuthExchangeResult(
             accounts=accounts,
-            provider_metadata_json={"destination_count": len(accounts), "destination_type": "facebook_page"},
+            provider_metadata_json={
+                "destination_count": len(accounts),
+                "facebook_account_count": 1,
+                "facebook_page_count": pages_count,
+            },
         )
 
     def exchange_code(
@@ -306,4 +362,3 @@ class FacebookAdapter(SocialProviderAdapter):
             external_post_url=_canonical_post_url(external_id, page_id),
             provider_metadata_json={"facebook_response": response},
         )
-

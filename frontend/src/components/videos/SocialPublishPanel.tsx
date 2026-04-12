@@ -167,6 +167,14 @@ function hasAnyOverrideValue(fields: PublishFormFields): boolean {
   );
 }
 
+function isFacebookPageDestination(account: ConnectedAccount): boolean {
+  return account.platform === "facebook" && account.destination_type === "facebook_page";
+}
+
+function isFacebookAccountIdentity(account: ConnectedAccount): boolean {
+  return account.platform === "facebook" && account.destination_type === "facebook_account";
+}
+
 function pad2(value: number): string {
   return value.toString().padStart(2, "0");
 }
@@ -556,7 +564,11 @@ export function SocialPublishPanel({ exports, clip: initialClip, onClipUpdate }:
         const next = { ...previous };
         for (const platform of PLATFORM_ORDER) {
           const platformAccounts = accountsData.filter((account) => account.platform === platform);
-          const defaultAccountId = platformAccounts[0]?.id ?? "";
+          const selectableAccounts =
+            platform === "facebook"
+              ? platformAccounts.filter((account) => isFacebookPageDestination(account))
+              : platformAccounts;
+          const defaultAccountId = selectableAccounts[0]?.id ?? "";
           const prior = previous[platform] ?? {
             enabled: false,
             connected_account_id: "",
@@ -567,7 +579,8 @@ export function SocialPublishPanel({ exports, clip: initialClip, onClipUpdate }:
           next[platform] = {
             ...prior,
             connected_account_id:
-              prior.connected_account_id && platformAccounts.some((account) => account.id === prior.connected_account_id)
+              prior.connected_account_id &&
+              selectableAccounts.some((account) => account.id === prior.connected_account_id)
                 ? prior.connected_account_id
                 : defaultAccountId,
           };
@@ -809,6 +822,27 @@ export function SocialPublishPanel({ exports, clip: initialClip, onClipUpdate }:
     [providers]
   );
 
+  const openFacebookManualShare = () => {
+    if (!selectedExportId) {
+      setError("Select a ready export first.");
+      return;
+    }
+    if (typeof window === "undefined") return;
+
+    const shareUrl = `${window.location.origin}/share/exports/${selectedExportId}`;
+    const quote = [universalFields.title.trim(), universalFields.caption.trim()]
+      .filter(Boolean)
+      .join(" ")
+      .trim()
+      .slice(0, 250);
+    const dialogUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}${
+      quote ? `&quote=${encodeURIComponent(quote)}` : ""
+    }`;
+
+    window.open(dialogUrl, "_blank", "noopener,noreferrer");
+    setMessage("Opened Facebook manual share dialog for your personal profile.");
+  };
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -960,12 +994,18 @@ export function SocialPublishPanel({ exports, clip: initialClip, onClipUpdate }:
         {PLATFORM_ORDER.map((platform) => {
           const provider = providersByPlatform[platform];
           const platformAccounts = accountsByPlatform[platform] || [];
+          const facebookIdentityAccounts = platform === "facebook"
+            ? platformAccounts.filter((account) => isFacebookAccountIdentity(account))
+            : [];
+          const selectableAccounts = platform === "facebook"
+            ? platformAccounts.filter((account) => isFacebookPageDestination(account))
+            : platformAccounts;
           const draft = targetDrafts[platform];
           const latestJob = latestJobsByPlatform.get(platform);
           const providerName = provider?.display_name || platform;
           const providerReady = provider?.setup_status === "ready";
           const providerSupportsSchedule = Boolean(provider?.capabilities?.supports_schedule);
-          const hasConnectedAccounts = platformAccounts.length > 0;
+          const hasConnectedAccounts = selectableAccounts.length > 0;
           const privacyOptions = PRIVACY_OPTIONS_BY_PLATFORM[platform] || [];
           const reconnectRequired = isReconnectRequiredXJob(latestJob);
 
@@ -994,27 +1034,42 @@ export function SocialPublishPanel({ exports, clip: initialClip, onClipUpdate }:
               <p className="mt-2 text-xs text-slate-400">
                 {!providerReady
                   ? provider?.setup_message || "Provider is not configured"
-                  : hasConnectedAccounts
-                    ? `${platformAccounts.length} account(s) connected`
-                    : "No connected accounts. Connect one first."}
+                  : platform === "facebook"
+                    ? hasConnectedAccounts
+                      ? `${selectableAccounts.length} page destination(s) connected for automated publishing`
+                      : facebookIdentityAccounts.length > 0
+                        ? "Facebook account connected, but no Pages found. Automated publishing requires a Page."
+                        : "No connected Facebook account yet."
+                    : hasConnectedAccounts
+                      ? `${selectableAccounts.length} account(s) connected`
+                      : "No connected accounts. Connect one first."}
               </p>
               {platform === "threads" ? (
                 <p className="mt-1 text-[11px] text-slate-500">
                   Threads currently publishes text posts. Media/video publish is deferred.
                 </p>
               ) : null}
+              {platform === "facebook" ? (
+                <p className="mt-1 text-[11px] text-slate-500">
+                  Facebook Pages support automated publishing. Personal profile sharing is manual.
+                </p>
+              ) : null}
 
               <div className="mt-3 grid gap-3 md:grid-cols-2">
                 <label className="text-xs text-slate-400">
-                  Account
+                  {platform === "facebook" ? "Page Destination" : "Account"}
                   <select
                     value={draft?.connected_account_id || ""}
                     onChange={(event) => handlePlatformAccountChange(platform, event.target.value)}
                     disabled={!hasConnectedAccounts}
                     className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-[#7C3AED] focus:outline-none disabled:opacity-50"
                   >
-                    {platformAccounts.length ? null : <option value="">No connected accounts</option>}
-                    {platformAccounts.map((account) => (
+                    {selectableAccounts.length ? null : (
+                      <option value="">
+                        {platform === "facebook" ? "No Facebook Pages connected" : "No connected accounts"}
+                      </option>
+                    )}
+                    {selectableAccounts.map((account) => (
                       <option key={account.id} value={account.id}>
                         {account.display_name || account.username_or_channel_name || account.external_account_id}
                       </option>
@@ -1118,6 +1173,22 @@ export function SocialPublishPanel({ exports, clip: initialClip, onClipUpdate }:
               ) : null}
 
               {latestJob?.error_message ? <p className="mt-3 text-xs text-red-400">{latestJob.error_message}</p> : null}
+              {platform === "facebook" ? (
+                <div className="mt-3 rounded-md border border-slate-700 bg-slate-950/50 p-3">
+                  <p className="text-xs font-medium text-slate-200">Share to personal profile (manual)</p>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Opens Facebook&apos;s manual share flow. This does not create a publish job.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={openFacebookManualShare}
+                    disabled={!selectedExportId}
+                    className="mt-2 inline-flex rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800 disabled:opacity-60"
+                  >
+                    Share to Personal Profile
+                  </button>
+                </div>
+              ) : null}
               {platform === "x" && reconnectRequired ? (
                 <p className="mt-1 text-[11px] text-amber-300">
                   Reconnect X in{" "}

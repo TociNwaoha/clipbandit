@@ -7,13 +7,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
+from app.config import settings
 from app.database import get_db
 from app.models.clip import Clip
 from app.models.export import Export, ExportStatus
 from app.models.job import Job, JobStatus
 from app.models.user import User
 from app.models.video import Video
-from app.schemas.export import ExportCreate, ExportResponse
+from app.schemas.export import ExportCreate, ExportResponse, PublicExportShareResponse
 from app.services.r2 import r2_client
 
 router = APIRouter()
@@ -65,6 +66,24 @@ def _derived_download_url(storage_key: str | None) -> str | None:
 def _clip_thumbnail_url(clip: Clip | None) -> str | None:
     if not clip or not clip.thumbnail_key:
         return None
+
+
+def _share_description(clip: Clip | None, video: Video | None) -> str:
+    transcript = " ".join((clip.transcript_text or "").split()) if clip else ""
+    if transcript:
+        limit = 280
+        if len(transcript) <= limit:
+            return transcript
+        cut = transcript[:limit]
+        last_space = cut.rfind(" ")
+        if last_space > 140:
+            cut = cut[:last_space]
+        return f"{cut.strip()}..."
+    if clip and clip.title:
+        return clip.title.strip()
+    if video and video.title:
+        return video.title.strip()
+    return "Shared from ClipBandit."
     try:
         return r2_client.get_presigned_download_url(clip.thumbnail_key)
     except Exception as exc:
@@ -202,6 +221,44 @@ async def get_export(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Export not found")
     export, clip, video = row
     return _to_response(export, clip, video)
+
+
+@router.get("/public/exports/{export_id}/share", response_model=PublicExportShareResponse)
+async def get_public_export_share(
+    export_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Export, Clip, Video)
+        .join(Clip, Export.clip_id == Clip.id)
+        .join(Video, Clip.video_id == Video.id)
+        .where(Export.id == export_id)
+    )
+    row = result.first()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share export not found")
+
+    export, clip, video = row
+    if export.status != ExportStatus.ready or not export.storage_key:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share export not found")
+
+    media_url = _derived_download_url(export.storage_key)
+    if not media_url:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share export not found")
+
+    title = (clip.title or video.title or "ClipBandit Share").strip()
+    share_url = f"{settings.frontend_public_url.rstrip('/')}/share/exports/{export.id}"
+
+    return PublicExportShareResponse(
+        export_id=export.id,
+        clip_id=clip.id,
+        video_id=video.id,
+        title=title,
+        description=_share_description(clip, video),
+        thumbnail_url=_clip_thumbnail_url(clip),
+        media_url=media_url,
+        share_url=share_url,
+    )
 
 
 @router.post("/exports", response_model=ExportResponse, status_code=status.HTTP_201_CREATED)

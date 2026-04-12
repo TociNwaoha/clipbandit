@@ -197,11 +197,23 @@ export interface ConnectedAccount {
   external_account_id: string;
   display_name: string | null;
   username_or_channel_name: string | null;
+  destination_type: string;
   token_expires_at: string | null;
   scopes: string[] | null;
   metadata_json: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+}
+
+export interface PublicExportShare {
+  export_id: string;
+  clip_id: string;
+  video_id: string;
+  title: string;
+  description: string;
+  thumbnail_url: string | null;
+  media_url: string;
+  share_url: string;
 }
 
 export type PublishJobStatus =

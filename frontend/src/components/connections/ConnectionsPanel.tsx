@@ -50,12 +50,9 @@ export function ConnectionsPanel() {
     return `Connection failed${platform ? ` for ${platform}` : ""}.`;
   }, [searchParams]);
 
-  const destinationTypeLabel = (account: ConnectedAccount): string | null => {
-    const value = account.metadata_json?.destination_type;
-    if (typeof value !== "string") return null;
-    return value
-      .replace(/_/g, " ")
-      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  const destinationTypeLabel = (value: string | null | undefined): string | null => {
+    if (!value) return null;
+    return value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
   };
 
   const load = async () => {
@@ -127,6 +124,10 @@ export function ConnectionsPanel() {
 
       {providers.map((provider) => {
         const providerAccounts = accounts.filter((account) => account.platform === provider.platform);
+        const facebookAccountRows = providerAccounts.filter(
+          (account) => account.destination_type === "facebook_account"
+        );
+        const facebookPageRows = providerAccounts.filter((account) => account.destination_type === "facebook_page");
         const setupClass = statusTextStyles[provider.setup_status] || "text-slate-300";
 
         return (
@@ -149,34 +150,115 @@ export function ConnectionsPanel() {
               </button>
             </div>
 
-            {providerAccounts.length > 0 ? (
+            {provider.platform === "facebook" ? (
               <div className="mt-4 space-y-2">
-                {providerAccounts.map((account) => (
-                  <div key={account.id} className="rounded-md border border-slate-700 bg-slate-900/40 p-3">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <p className="text-sm text-white">{account.display_name || account.external_account_id}</p>
-                        <p className="mt-1 text-xs text-slate-400">
-                          {account.username_or_channel_name || account.external_account_id}
-                        </p>
-                        {destinationTypeLabel(account) ? (
-                          <p className="mt-1 text-[11px] text-slate-500">{destinationTypeLabel(account)}</p>
-                        ) : null}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => void disconnectAccount(account.id)}
-                        disabled={disconnectingAccountId === account.id}
-                        className="rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800 disabled:opacity-50"
-                      >
-                        {disconnectingAccountId === account.id ? "Disconnecting..." : "Disconnect"}
-                      </button>
+                <div className="rounded-md border border-slate-700 bg-slate-900/40 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+                    Connected Facebook Account(s)
+                  </p>
+                  {facebookAccountRows.length ? (
+                    <div className="mt-2 space-y-2">
+                      {facebookAccountRows.map((account) => (
+                        <div key={account.id} className="rounded-md border border-slate-700 bg-slate-950/60 p-3">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                              <p className="text-sm text-white">{account.display_name || account.external_account_id}</p>
+                              <p className="mt-1 text-xs text-slate-400">
+                                {account.username_or_channel_name || account.external_account_id}
+                              </p>
+                              <p className="mt-1 text-[11px] text-slate-500">
+                                {destinationTypeLabel(account.destination_type)}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => void disconnectAccount(account.id)}
+                              disabled={disconnectingAccountId === account.id}
+                              className="rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+                            >
+                              {disconnectingAccountId === account.id ? "Disconnecting..." : "Disconnect"}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  </div>
-                ))}
+                  ) : (
+                    <p className="mt-2 text-sm text-slate-400">No Facebook account connected yet.</p>
+                  )}
+                </div>
+
+                <div className="rounded-md border border-slate-700 bg-slate-900/40 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+                    Facebook Page Destinations (Automated Publish)
+                  </p>
+                  {facebookPageRows.length ? (
+                    <div className="mt-2 space-y-2">
+                      {facebookPageRows.map((account) => (
+                        <div key={account.id} className="rounded-md border border-slate-700 bg-slate-950/60 p-3">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                              <p className="text-sm text-white">{account.display_name || account.external_account_id}</p>
+                              <p className="mt-1 text-xs text-slate-400">
+                                {account.username_or_channel_name || account.external_account_id}
+                              </p>
+                              <p className="mt-1 text-[11px] text-slate-500">
+                                {destinationTypeLabel(account.destination_type)}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => void disconnectAccount(account.id)}
+                              disabled={disconnectingAccountId === account.id}
+                              className="rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+                            >
+                              {disconnectingAccountId === account.id ? "Disconnecting..." : "Disconnect"}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-sm text-slate-400">
+                      No Pages discovered yet. Automated Facebook publishing requires at least one managed Page.
+                    </p>
+                  )}
+                  <p className="mt-2 text-[11px] text-slate-500">
+                    Personal profile sharing is available as a manual action from the clip publish panel.
+                  </p>
+                </div>
               </div>
             ) : (
-              <p className="mt-4 text-sm text-slate-400">No accounts connected yet.</p>
+              providerAccounts.length > 0 ? (
+                <div className="mt-4 space-y-2">
+                  {providerAccounts.map((account) => (
+                    <div key={account.id} className="rounded-md border border-slate-700 bg-slate-900/40 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm text-white">{account.display_name || account.external_account_id}</p>
+                          <p className="mt-1 text-xs text-slate-400">
+                            {account.username_or_channel_name || account.external_account_id}
+                          </p>
+                          {destinationTypeLabel(account.destination_type) ? (
+                            <p className="mt-1 text-[11px] text-slate-500">
+                              {destinationTypeLabel(account.destination_type)}
+                            </p>
+                          ) : null}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void disconnectAccount(account.id)}
+                          disabled={disconnectingAccountId === account.id}
+                          className="rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+                        >
+                          {disconnectingAccountId === account.id ? "Disconnecting..." : "Disconnect"}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-4 text-sm text-slate-400">No accounts connected yet.</p>
+              )
             )}
           </Card>
         );

@@ -40,13 +40,32 @@ export function ConnectionsSummary() {
 
       <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {providers.map((provider) => {
+          const setupDetails = (provider.setup_details || {}) as Record<string, unknown>;
+          const facebookPageCount =
+            provider.platform === "facebook" && typeof setupDetails.facebook_page_count === "number"
+              ? setupDetails.facebook_page_count
+              : 0;
+          const facebookAccountCount =
+            provider.platform === "facebook" && typeof setupDetails.facebook_account_count === "number"
+              ? setupDetails.facebook_account_count
+              : 0;
           const connected = provider.connected_account_count > 0;
           return (
             <div key={provider.platform} className="rounded-md border border-slate-700 bg-slate-900/30 px-3 py-2">
               <p className="text-sm font-medium text-white">{provider.display_name}</p>
-              <p className="mt-1 text-xs text-slate-400">
-                {connected ? `${provider.connected_account_count} connected` : "Not connected"}
-              </p>
+              {provider.platform === "facebook" ? (
+                <div className="mt-1 space-y-1 text-xs text-slate-400">
+                  <p>{facebookAccountCount > 0 ? `${facebookAccountCount} account connected` : "Account not connected"}</p>
+                  <p>{facebookPageCount > 0 ? `${facebookPageCount} page destination(s)` : "No page destinations"}</p>
+                  {facebookAccountCount > 0 && facebookPageCount === 0 ? (
+                    <p className="text-[11px] text-slate-500">Manual profile sharing is available; Page publishing is not.</p>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="mt-1 text-xs text-slate-400">
+                  {connected ? `${provider.connected_account_count} connected` : "Not connected"}
+                </p>
+              )}
               {!connected && provider.setup_message ? (
                 <p className="mt-1 line-clamp-2 text-[11px] text-slate-500">{provider.setup_message}</p>
               ) : null}

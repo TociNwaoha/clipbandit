@@ -1,5 +1,7 @@
 import logging
 import uuid
+from collections import defaultdict
+from typing import Any
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -176,6 +178,23 @@ def _normalize_privacy(platform: SocialPlatform, value: str | None) -> str | Non
     return normalized
 
 
+def _destination_type_from_metadata(platform: SocialPlatform, metadata_json: Any) -> str:
+    if isinstance(metadata_json, dict):
+        value = metadata_json.get("destination_type")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return f"{platform.value}_account"
+
+
+def _destination_type_for_account(account: ConnectedAccount) -> str:
+    destination_type = _destination_type_from_metadata(account.platform, account.metadata_json)
+    if account.platform == SocialPlatform.facebook:
+        if destination_type in {"facebook_account", "facebook_page"}:
+            return destination_type
+        return "facebook_page"
+    return destination_type
+
+
 async def _enqueue_publish(db: AsyncSession, publish_job: PublishJob, eta: datetime | None = None):
     from app.worker.tasks.publish import execute_publish_job
 
@@ -228,16 +247,35 @@ async def list_social_providers(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    counts_result = await db.execute(
-        select(ConnectedAccount.platform, func.count(ConnectedAccount.id))
-        .where(ConnectedAccount.user_id == current_user.id)
-        .group_by(ConnectedAccount.platform)
+    accounts_result = await db.execute(
+        select(ConnectedAccount).where(ConnectedAccount.user_id == current_user.id)
     )
-    counts = {platform.value: count for platform, count in counts_result.all()}
+    connected_rows = accounts_result.scalars().all()
+    counts: dict[str, int] = defaultdict(int)
+    destination_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+
+    for row in connected_rows:
+        platform_key = row.platform.value
+        counts[platform_key] += 1
+        destination_type = _destination_type_for_account(row)
+        destination_counts[platform_key][destination_type] += 1
 
     items: list[SocialProviderResponse] = []
     for adapter in all_adapters():
         setup_status, setup_message, setup_details = _provider_setup(adapter)
+        if adapter.platform == SocialPlatform.facebook:
+            facebook_account_count = destination_counts["facebook"].get("facebook_account", 0)
+            facebook_page_count = destination_counts["facebook"].get("facebook_page", 0)
+            setup_details = {
+                **setup_details,
+                "supports_page_auto_publish": True,
+                "supports_profile_auto_publish": False,
+                "supports_profile_manual_share": True,
+                "pages_discovery_ready": setup_status == "ready",
+                "pages_publish_ready": setup_status == "ready" and facebook_page_count > 0,
+                "facebook_account_count": facebook_account_count,
+                "facebook_page_count": facebook_page_count,
+            }
 
         logger.info(
             "[social] provider readiness platform=%s status=%s missing_fields=%s",
@@ -272,7 +310,24 @@ async def list_connected_accounts(
         .where(ConnectedAccount.user_id == current_user.id)
         .order_by(ConnectedAccount.created_at.desc())
     )
-    return result.scalars().all()
+    accounts = result.scalars().all()
+    return [
+        ConnectedAccountResponse(
+            id=account.id,
+            user_id=account.user_id,
+            platform=account.platform,
+            external_account_id=account.external_account_id,
+            display_name=account.display_name,
+            username_or_channel_name=account.username_or_channel_name,
+            destination_type=_destination_type_for_account(account),
+            token_expires_at=account.token_expires_at,
+            scopes=account.scopes,
+            metadata_json=account.metadata_json or {},
+            created_at=account.created_at,
+            updated_at=account.updated_at,
+        )
+        for account in accounts
+    ]
 
 
 @router.post("/social/{platform}/connect", response_model=ConnectStartResponse)
@@ -513,6 +568,13 @@ async def create_publish_jobs(
             raise HTTPException(status_code=404, detail=f"Connected account not found: {target.connected_account_id}")
         if account.platform != target.platform:
             raise HTTPException(status_code=400, detail="Connected account platform mismatch")
+        if target.platform == SocialPlatform.facebook:
+            destination_type = _destination_type_for_account(account)
+            if destination_type != "facebook_page":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Automated Facebook publishing requires a connected Facebook Page destination.",
+                )
 
         content = _merge_content(body.universal, target.override)
         hashtags = _normalize_hashtags(content["hashtags"])
