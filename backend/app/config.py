@@ -55,8 +55,17 @@ class Settings(BaseSettings):
     youtube_client_id: str = "placeholder"
     youtube_client_secret: str = "placeholder"
 
+    facebook_app_id: str = "placeholder"
+    facebook_app_secret: str = "placeholder"
+    instagram_app_id: str = "placeholder"
+    instagram_app_secret: str = "placeholder"
+    threads_app_id: str = "placeholder"
+    threads_app_secret: str = "placeholder"
+
     meta_app_id: str = "placeholder"
     meta_app_secret: str = "placeholder"
+    meta_graph_api_version: str = "v21.0"
+    threads_graph_api_version: str = "v1.0"
 
     tiktok_client_key: str = "placeholder"
     tiktok_client_secret: str = "placeholder"

@@ -43,6 +43,9 @@ from app.services.social.x import build_pkce_challenge, generate_pkce_verifier
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+PRIVACY_OPTIONS_BY_PLATFORM: dict[SocialPlatform, set[str]] = {
+    SocialPlatform.youtube: {"private", "unlisted", "public"},
+}
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
@@ -147,6 +150,30 @@ def _normalize_hashtags(values: list[str] | None) -> list[str] | None:
         seen.add(clean.lower())
         normalized.append(clean)
     return normalized or None
+
+
+def _normalize_privacy(platform: SocialPlatform, value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if not normalized:
+        return None
+
+    allowed = PRIVACY_OPTIONS_BY_PLATFORM.get(platform)
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Privacy is not supported for {platform.value}",
+        )
+
+    if normalized not in allowed:
+        allowed_values = ", ".join(sorted(allowed))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid privacy value for {platform.value}. Allowed: {allowed_values}",
+        )
+
+    return normalized
 
 
 async def _enqueue_publish(db: AsyncSession, publish_job: PublishJob, eta: datetime | None = None):
@@ -286,14 +313,11 @@ async def start_connect(
         oauth_context = {"code_challenge": code_challenge}
 
     try:
-        if platform == SocialPlatform.x:
-            authorization_url = adapter.build_connect_url(
-                state=state,
-                redirect_uri=_callback_url(platform),
-                oauth_context=oauth_context,
-            )
-        else:
-            authorization_url = adapter.build_connect_url(state=state, redirect_uri=_callback_url(platform))
+        authorization_url = adapter.build_connect_url(
+            state=state,
+            redirect_uri=_callback_url(platform),
+            oauth_context=oauth_context,
+        )
     except ProviderOperationError as exc:
         if platform == SocialPlatform.x:
             await discard_pkce_verifier(platform=platform, nonce=nonce)
@@ -357,18 +381,14 @@ async def oauth_callback(
         oauth_context = {"code_verifier": code_verifier}
 
     try:
-        if platform == SocialPlatform.x:
-            oauth_payload = adapter.exchange_code(
-                code=code,
-                redirect_uri=_callback_url(platform),
-                oauth_context=oauth_context,
-            )
-        else:
-            oauth_payload = adapter.exchange_code(code=code, redirect_uri=_callback_url(platform))
-        access_token_encrypted = encrypt_secret(oauth_payload.access_token)
-        refresh_token_encrypted = (
-            encrypt_secret(oauth_payload.refresh_token) if oauth_payload.refresh_token else None
+        exchange_result = adapter.exchange_code_result(
+            code=code,
+            redirect_uri=_callback_url(platform),
+            oauth_context=oauth_context,
         )
+        oauth_accounts = exchange_result.accounts
+        if not oauth_accounts:
+            raise ProviderOperationError("OAuth completed but no destination accounts were returned.")
     except (ProviderOperationError, ProviderNotConfiguredError, CryptoConfigError) as exc:
         logging.warning(
             "[social] callback failed platform=%s user_id=%s reason=%s",
@@ -389,41 +409,51 @@ async def oauth_callback(
             f"{target_base}?status=error&platform={platform.value}&message=internal_callback_error"
         )
 
-    existing_result = await db.execute(
-        select(ConnectedAccount).where(
-            ConnectedAccount.user_id == user_id,
-            ConnectedAccount.platform == platform,
-            ConnectedAccount.external_account_id == oauth_payload.external_account_id,
+    upserted_count = 0
+    for oauth_payload in oauth_accounts:
+        access_token_encrypted = encrypt_secret(oauth_payload.access_token)
+        refresh_token_encrypted = (
+            encrypt_secret(oauth_payload.refresh_token) if oauth_payload.refresh_token else None
         )
-    )
-    existing = existing_result.scalar_one_or_none()
 
-    if existing:
-        existing.display_name = oauth_payload.display_name
-        existing.username_or_channel_name = oauth_payload.username_or_channel_name
-        existing.access_token_encrypted = access_token_encrypted
-        existing.refresh_token_encrypted = refresh_token_encrypted
-        existing.token_expires_at = oauth_payload.token_expires_at
-        existing.scopes = oauth_payload.scopes
-        existing.metadata_json = oauth_payload.metadata_json
-    else:
-        db.add(
-            ConnectedAccount(
-                user_id=user_id,
-                platform=platform,
-                external_account_id=oauth_payload.external_account_id,
-                display_name=oauth_payload.display_name,
-                username_or_channel_name=oauth_payload.username_or_channel_name,
-                access_token_encrypted=access_token_encrypted,
-                refresh_token_encrypted=refresh_token_encrypted,
-                token_expires_at=oauth_payload.token_expires_at,
-                scopes=oauth_payload.scopes,
-                metadata_json=oauth_payload.metadata_json,
+        existing_result = await db.execute(
+            select(ConnectedAccount).where(
+                ConnectedAccount.user_id == user_id,
+                ConnectedAccount.platform == platform,
+                ConnectedAccount.external_account_id == oauth_payload.external_account_id,
             )
         )
+        existing = existing_result.scalar_one_or_none()
+
+        if existing:
+            existing.display_name = oauth_payload.display_name
+            existing.username_or_channel_name = oauth_payload.username_or_channel_name
+            existing.access_token_encrypted = access_token_encrypted
+            existing.refresh_token_encrypted = refresh_token_encrypted
+            existing.token_expires_at = oauth_payload.token_expires_at
+            existing.scopes = oauth_payload.scopes
+            existing.metadata_json = oauth_payload.metadata_json
+        else:
+            db.add(
+                ConnectedAccount(
+                    user_id=user_id,
+                    platform=platform,
+                    external_account_id=oauth_payload.external_account_id,
+                    display_name=oauth_payload.display_name,
+                    username_or_channel_name=oauth_payload.username_or_channel_name,
+                    access_token_encrypted=access_token_encrypted,
+                    refresh_token_encrypted=refresh_token_encrypted,
+                    token_expires_at=oauth_payload.token_expires_at,
+                    scopes=oauth_payload.scopes,
+                    metadata_json=oauth_payload.metadata_json,
+                )
+            )
+        upserted_count += 1
 
     await db.commit()
-    return RedirectResponse(f"{target_base}?status=connected&platform={platform.value}")
+    return RedirectResponse(
+        f"{target_base}?status=connected&platform={platform.value}&destinations={upserted_count}"
+    )
 
 
 @router.delete("/social/accounts/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -486,11 +516,27 @@ async def create_publish_jobs(
 
         content = _merge_content(body.universal, target.override)
         hashtags = _normalize_hashtags(content["hashtags"])
+        privacy = _normalize_privacy(target.platform, content["privacy"])
 
         scheduled_for = content["scheduled_for"]
-        mode = PublishMode.scheduled if scheduled_for and scheduled_for > datetime.now(timezone.utc) else PublishMode.now
-
         adapter = get_adapter(target.platform)
+        capabilities = adapter.capabilities()
+        now_utc = datetime.now(timezone.utc)
+
+        if scheduled_for:
+            if scheduled_for <= now_utc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Scheduled time for {target.platform.value} must be in the future",
+                )
+            if not capabilities.supports_schedule:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Scheduling is not supported for {target.platform.value}",
+                )
+
+        mode = PublishMode.scheduled if scheduled_for else PublishMode.now
+
         setup_status, setup_message, setup_details = _provider_setup(adapter)
         initial_status = PublishStatus.queued
         initial_error = None
@@ -514,7 +560,7 @@ async def create_publish_jobs(
             title=content["title"],
             description=content["description"],
             hashtags=hashtags,
-            privacy=content["privacy"],
+            privacy=privacy,
             scheduled_for=scheduled_for,
             error_message=initial_error,
             provider_metadata_json={

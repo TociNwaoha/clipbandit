@@ -43,6 +43,63 @@ Google Cloud OAuth redirect URI must match:
 
 If any required field is missing/invalid, `/api/social/providers` returns YouTube as `provider_not_configured` with missing-field diagnostics.
 
+## Facebook Pages Provider Config
+
+To enable real Facebook Pages connection + publishing:
+
+- Set `FACEBOOK_APP_ID` and `FACEBOOK_APP_SECRET`
+  - or use shared fallback `META_APP_ID` and `META_APP_SECRET`
+- Set `SOCIAL_TOKEN_ENCRYPTION_KEY` (required for encrypted token storage)
+- Set `BACKEND_PUBLIC_URL` to your externally reachable backend URL
+- Optional: set `META_GRAPH_API_VERSION` (default `v21.0`)
+
+Facebook callback URI must match:
+
+- `{BACKEND_PUBLIC_URL}/api/social/facebook/callback`
+
+Notes:
+
+- Facebook integration targets **Pages only** (not personal profiles).
+- One OAuth connection may create multiple connected destinations (one per Page).
+
+## Instagram OAuth Provider Config (`instagram_business_basic`)
+
+To enable real Instagram professional-account connection + publishing:
+
+- Set `INSTAGRAM_APP_ID` and `INSTAGRAM_APP_SECRET`
+  - or use shared fallback `META_APP_ID` and `META_APP_SECRET`
+- Set `SOCIAL_TOKEN_ENCRYPTION_KEY` (required for encrypted token storage)
+- Set `BACKEND_PUBLIC_URL` to your externally reachable backend URL
+- Optional: set `META_GRAPH_API_VERSION` (default `v21.0`)
+
+Instagram callback URI must match:
+
+- `{BACKEND_PUBLIC_URL}/api/social/instagram/callback`
+
+Notes:
+
+- Instagram integration targets **Business/Creator** accounts only.
+- If OAuth succeeds but no professional Instagram account is returned, ClipBandit fails honestly and asks for reconnect with the correct account.
+
+## Threads Provider Config
+
+To enable real Threads connection + text publishing:
+
+- Set `THREADS_APP_ID` and `THREADS_APP_SECRET`
+  - or use shared fallback `META_APP_ID` and `META_APP_SECRET`
+- Set `SOCIAL_TOKEN_ENCRYPTION_KEY` (required for encrypted token storage)
+- Set `BACKEND_PUBLIC_URL` to your externally reachable backend URL
+- Optional: set `THREADS_GRAPH_API_VERSION` (default `v1.0`)
+
+Threads callback URI must match:
+
+- `{BACKEND_PUBLIC_URL}/api/social/threads/callback`
+
+Notes:
+
+- Threads integration is real for connect + text posting in this pass.
+- Threads media/video posting is deferred and reported honestly in status metadata.
+
 ## X (Twitter) OAuth Provider Config
 
 To enable real X connection + text posting flow:

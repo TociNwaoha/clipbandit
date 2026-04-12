@@ -164,7 +164,7 @@ export interface TranscriptSegment {
   created_at: string;
 }
 
-export type SocialPlatform = "instagram" | "tiktok" | "facebook" | "youtube" | "x" | "linkedin";
+export type SocialPlatform = "instagram" | "threads" | "tiktok" | "facebook" | "youtube" | "x" | "linkedin";
 
 export interface SocialProviderCapabilities {
   supports_connect: boolean;

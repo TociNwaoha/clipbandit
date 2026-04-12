@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 
 import { Card } from "@/components/ui/Card";
@@ -29,7 +30,13 @@ export function ConnectionsPanel() {
     const reason = searchParams.get("message");
     if (!callbackStatus) return null;
     const target = platform || "account";
-    if (callbackStatus === "connected") return `Connected ${target} successfully.`;
+    if (callbackStatus === "connected") {
+      const destinations = searchParams.get("destinations");
+      if (destinations && Number(destinations) > 1) {
+        return `Connected ${target} successfully (${destinations} destinations discovered).`;
+      }
+      return `Connected ${target} successfully.`;
+    }
 
     if (reason === "oauth_session_expired") {
       return `Connection failed for ${target}: session expired. Start connect again.`;
@@ -42,6 +49,14 @@ export function ConnectionsPanel() {
     }
     return `Connection failed${platform ? ` for ${platform}` : ""}.`;
   }, [searchParams]);
+
+  const destinationTypeLabel = (account: ConnectedAccount): string | null => {
+    const value = account.metadata_json?.destination_type;
+    if (typeof value !== "string") return null;
+    return value
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  };
 
   const load = async () => {
     setLoading(true);
@@ -94,6 +109,11 @@ export function ConnectionsPanel() {
 
   return (
     <div className="space-y-5">
+      <div className="flex items-center justify-end">
+        <Link href="/review/meta-instagram" className="text-sm text-[#A78BFA] hover:text-[#C4B5FD]">
+          Open Meta review demo
+        </Link>
+      </div>
       {callbackMessage ? <p className="text-sm text-emerald-300">{callbackMessage}</p> : null}
       {actionError ? <p className="text-sm text-red-400">{actionError}</p> : null}
       {error ? <p className="text-sm text-red-400">{error}</p> : null}
@@ -139,6 +159,9 @@ export function ConnectionsPanel() {
                         <p className="mt-1 text-xs text-slate-400">
                           {account.username_or_channel_name || account.external_account_id}
                         </p>
+                        {destinationTypeLabel(account) ? (
+                          <p className="mt-1 text-[11px] text-slate-500">{destinationTypeLabel(account)}</p>
+                        ) : null}
                       </div>
                       <button
                         type="button"

@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { api, ApiError } from "@/lib/api";
 import {
+  Clip,
   ConnectedAccount,
   Export,
   PublishJobStatus,
@@ -16,6 +17,8 @@ import {
 
 interface SocialPublishPanelProps {
   exports: Export[];
+  clip: Clip;
+  onClipUpdate?: (clip: Clip) => void;
 }
 
 interface PublishFormFields {
@@ -34,8 +37,15 @@ interface TargetDraft {
   override: PublishFormFields;
 }
 
-const PLATFORM_ORDER: SocialPlatform[] = ["instagram", "tiktok", "facebook", "youtube", "x", "linkedin"];
+const PLATFORM_ORDER: SocialPlatform[] = ["instagram", "threads", "facebook", "youtube", "x", "tiktok", "linkedin"];
 const ACTIVE_PUBLISH_STATUSES = new Set<PublishJobStatus>(["queued", "publishing"]);
+const PRIVACY_OPTIONS_BY_PLATFORM: Partial<Record<SocialPlatform, Array<{ value: string; label: string }>>> = {
+  youtube: [
+    { value: "private", label: "Private" },
+    { value: "unlisted", label: "Unlisted" },
+    { value: "public", label: "Public" },
+  ],
+};
 
 const statusStyles: Record<PublishJobStatus, string> = {
   queued: "bg-slate-700/80 text-slate-200",
@@ -60,6 +70,23 @@ function emptyFields(): PublishFormFields {
 function normalizeText(value: string): string | null {
   const trimmed = value.trim();
   return trimmed.length ? trimmed : null;
+}
+
+function cleanText(value: string | null | undefined): string {
+  return (value || "").trim();
+}
+
+function descriptionFromTranscript(transcript: string | null | undefined): string {
+  const normalized = (transcript || "").replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+
+  const maxLen = 260;
+  if (normalized.length <= maxLen) return normalized;
+
+  const cut = normalized.slice(0, maxLen);
+  const lastSpace = cut.lastIndexOf(" ");
+  const safeCut = lastSpace > 120 ? cut.slice(0, lastSpace) : cut;
+  return `${safeCut.trim()}...`;
 }
 
 function parseHashtags(value: string): string[] | null {
@@ -98,12 +125,35 @@ function toPayloadFields(fields: PublishFormFields) {
     scheduled_for: toIsoDatetime(fields.scheduled_for),
   };
 }
+type PublishPayloadFields = ReturnType<typeof toPayloadFields>;
 
 function prettyStatus(status: PublishJobStatus): string {
   return status
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string");
+}
+
+function isReconnectRequiredXJob(job: SocialPublishJob | undefined): boolean {
+  if (!job || job.platform !== "x") return false;
+
+  const metadata = job.provider_metadata_json || {};
+  const action = typeof metadata.action === "string" ? metadata.action : "";
+  const reason = typeof metadata.reason === "string" ? metadata.reason : "";
+  const missingScopes = asStringArray(metadata.missing_scopes).map((scope) => scope.toLowerCase());
+  const errorMessage = (job.error_message || "").toLowerCase();
+
+  if (action === "reconnect_x") return true;
+  if (job.status === "waiting_user_action" && (reason === "missing_scope" || reason === "reconnect_required")) {
+    return true;
+  }
+  if (missingScopes.includes("media.write")) return true;
+  return errorMessage.includes("reconnect");
 }
 
 function hasAnyOverrideValue(fields: PublishFormFields): boolean {
@@ -117,11 +167,322 @@ function hasAnyOverrideValue(fields: PublishFormFields): boolean {
   );
 }
 
-export function SocialPublishPanel({ exports }: SocialPublishPanelProps) {
+function pad2(value: number): string {
+  return value.toString().padStart(2, "0");
+}
+
+function toLocalDateInput(value: Date): string {
+  return `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}`;
+}
+
+function parseLocalDatetimeInput(value: string): Date | null {
+  if (!value) return null;
+  const [datePart, timePart] = value.split("T");
+  if (!datePart || !timePart) return null;
+  const [yearText, monthText, dayText] = datePart.split("-");
+  const [hourText, minuteText] = timePart.split(":");
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  if (
+    !Number.isFinite(year) ||
+    !Number.isFinite(month) ||
+    !Number.isFinite(day) ||
+    !Number.isFinite(hour) ||
+    !Number.isFinite(minute)
+  ) {
+    return null;
+  }
+
+  const parsed = new Date(year, month - 1, day, hour, minute, 0, 0);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+}
+
+function startOfDay(value: Date): Date {
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate(), 0, 0, 0, 0);
+}
+
+function isSameDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+function ceilToNextFiveMinutes(value: Date): Date {
+  const next = new Date(value.getTime() + 60_000);
+  next.setSeconds(0, 0);
+  const remainder = next.getMinutes() % 5;
+  if (remainder !== 0) {
+    next.setMinutes(next.getMinutes() + (5 - remainder));
+  }
+  return next;
+}
+
+function formatScheduleLabel(value: string): string {
+  const parsed = parseLocalDatetimeInput(value);
+  if (!parsed) return "Select date and time";
+  return parsed.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function getBrowserTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "Local time";
+  } catch {
+    return "Local time";
+  }
+}
+
+interface SchedulePickerProps {
+  value: string;
+  onChange: (next: string) => void;
+  disabled?: boolean;
+  disabledReason?: string;
+}
+
+function SchedulePicker({ value, onChange, disabled = false, disabledReason }: SchedulePickerProps) {
+  const [open, setOpen] = useState(false);
+  const [nowTick, setNowTick] = useState(Date.now());
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const parsedValue = parseLocalDatetimeInput(value);
+  const [visibleMonth, setVisibleMonth] = useState<Date>(() => {
+    const base = parsedValue || new Date();
+    return new Date(base.getFullYear(), base.getMonth(), 1);
+  });
+  const now = new Date(nowTick);
+  const timezone = getBrowserTimeZone();
+
+  useEffect(() => {
+    if (!open) return;
+    const timer = window.setInterval(() => setNowTick(Date.now()), 15_000);
+    return () => window.clearInterval(timer);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onMouseDown = (event: MouseEvent) => {
+      if (!wrapperRef.current) return;
+      if (!wrapperRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, [open]);
+
+  useEffect(() => {
+    const base = parsedValue || new Date();
+    setVisibleMonth(new Date(base.getFullYear(), base.getMonth(), 1));
+  }, [value]);
+
+  const monthStart = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth(), 1);
+  const monthEnd = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + 1, 0);
+  const leadingDays = monthStart.getDay();
+  const totalDays = monthEnd.getDate();
+  const todayStart = startOfDay(now);
+
+  const calendarCells: Array<{ key: string; date: Date | null; disabled: boolean }> = [];
+  for (let i = 0; i < leadingDays; i += 1) {
+    calendarCells.push({ key: `blank-${i}`, date: null, disabled: true });
+  }
+  for (let day = 1; day <= totalDays; day += 1) {
+    const date = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth(), day, 0, 0, 0, 0);
+    calendarCells.push({
+      key: toLocalDateInput(date),
+      date,
+      disabled: date.getTime() < todayStart.getTime(),
+    });
+  }
+
+  const selectedDate = parsedValue ? startOfDay(parsedValue) : null;
+  const selectedDateKey = selectedDate ? toLocalDateInput(selectedDate) : "";
+  const selectedTime = parsedValue ? `${pad2(parsedValue.getHours())}:${pad2(parsedValue.getMinutes())}` : "";
+
+  const timeOptions = useMemo(() => {
+    if (!selectedDate) return [] as string[];
+
+    const options: string[] = [];
+    const minAllowed = isSameDay(selectedDate, now) ? ceilToNextFiveMinutes(now) : null;
+    for (let hour = 0; hour < 24; hour += 1) {
+      for (let minute = 0; minute < 60; minute += 5) {
+        const slot = new Date(
+          selectedDate.getFullYear(),
+          selectedDate.getMonth(),
+          selectedDate.getDate(),
+          hour,
+          minute,
+          0,
+          0
+        );
+        if (minAllowed && slot.getTime() < minAllowed.getTime()) continue;
+        options.push(`${pad2(hour)}:${pad2(minute)}`);
+      }
+    }
+    return options;
+  }, [selectedDate, now]);
+
+  const handleDaySelect = (day: Date) => {
+    if (day.getTime() < todayStart.getTime()) return;
+    const dayKey = toLocalDateInput(day);
+    const existing = parsedValue && toLocalDateInput(parsedValue) === dayKey ? parsedValue : null;
+    const existingTime = existing ? `${pad2(existing.getHours())}:${pad2(existing.getMinutes())}` : "";
+
+    const minAllowed = isSameDay(day, now) ? ceilToNextFiveMinutes(now) : null;
+    const options: string[] = [];
+    for (let hour = 0; hour < 24; hour += 1) {
+      for (let minute = 0; minute < 60; minute += 5) {
+        const slot = new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour, minute, 0, 0);
+        if (minAllowed && slot.getTime() < minAllowed.getTime()) continue;
+        options.push(`${pad2(hour)}:${pad2(minute)}`);
+      }
+    }
+
+    const chosenTime = existingTime && options.includes(existingTime) ? existingTime : options[0];
+    if (!chosenTime) {
+      onChange("");
+      return;
+    }
+    onChange(`${dayKey}T${chosenTime}`);
+  };
+
+  const handleTimeSelect = (nextTime: string) => {
+    if (!selectedDate) return;
+    onChange(`${toLocalDateInput(selectedDate)}T${nextTime}`);
+  };
+
+  return (
+    <div className="relative mt-1" ref={wrapperRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        disabled={disabled}
+        className="flex w-full items-center justify-between rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-left text-sm text-white hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <span>{value ? formatScheduleLabel(value) : "Post now (no schedule)"}</span>
+        <span className="text-xs text-slate-400">{open ? "Close" : "Pick"}</span>
+      </button>
+      <p className="mt-1 text-[11px] text-slate-500">Timezone: {timezone}</p>
+      {disabledReason ? <p className="mt-1 text-[11px] text-slate-500">{disabledReason}</p> : null}
+
+      {open && !disabled ? (
+        <div className="absolute z-30 mt-2 w-[320px] rounded-md border border-slate-700 bg-slate-950 p-3 shadow-2xl">
+          <div className="mb-2 flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() =>
+                setVisibleMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))
+              }
+              className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
+            >
+              Prev
+            </button>
+            <p className="text-sm font-medium text-slate-100">
+              {visibleMonth.toLocaleString(undefined, { month: "long", year: "numeric" })}
+            </p>
+            <button
+              type="button"
+              onClick={() =>
+                setVisibleMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))
+              }
+              className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
+            >
+              Next
+            </button>
+          </div>
+
+          <div className="mb-2 grid grid-cols-7 gap-1 text-center text-[10px] uppercase tracking-wide text-slate-500">
+            {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label) => (
+              <span key={label}>{label}</span>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-7 gap-1">
+            {calendarCells.map((cell) =>
+              cell.date ? (
+                <button
+                  key={cell.key}
+                  type="button"
+                  disabled={cell.disabled}
+                  onClick={() => handleDaySelect(cell.date as Date)}
+                  className={`rounded px-2 py-1 text-xs ${
+                    selectedDateKey === cell.key
+                      ? "bg-[#7C3AED] text-white"
+                      : cell.disabled
+                        ? "cursor-not-allowed text-slate-600"
+                        : "text-slate-200 hover:bg-slate-800"
+                  }`}
+                >
+                  {cell.date.getDate()}
+                </button>
+              ) : (
+                <span key={cell.key} className="px-2 py-1 text-xs text-transparent">
+                  .
+                </span>
+              )
+            )}
+          </div>
+
+          <div className="mt-3">
+            <label className="text-xs text-slate-400">
+              Time
+              <select
+                value={timeOptions.includes(selectedTime) ? selectedTime : ""}
+                onChange={(event) => handleTimeSelect(event.target.value)}
+                disabled={!selectedDate || !timeOptions.length}
+                className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-[#7C3AED] focus:outline-none disabled:opacity-50"
+              >
+                {!selectedDate ? <option value="">Select a day first</option> : null}
+                {selectedDate && !timeOptions.length ? <option value="">No future times left today</option> : null}
+                {timeOptions.map((time) => (
+                  <option key={time} value={time}>
+                    {time}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="mt-3 flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() => {
+                onChange("");
+                setOpen(false);
+              }}
+              className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
+            >
+              Post now
+            </button>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="rounded bg-[#7C3AED] px-2 py-1 text-xs font-medium text-white hover:bg-[#6D28D9]"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function SocialPublishPanel({ exports, clip: initialClip, onClipUpdate }: SocialPublishPanelProps) {
   const readyExports = useMemo(
     () => exports.filter((item) => item.status === "ready" && item.storage_key),
     [exports]
   );
+  const [clip, setClip] = useState<Clip>(initialClip);
   const [selectedExportId, setSelectedExportId] = useState<string>("");
   const [providers, setProviders] = useState<SocialProvider[]>([]);
   const [accounts, setAccounts] = useState<ConnectedAccount[]>([]);
@@ -135,9 +496,14 @@ export function SocialPublishPanel({ exports }: SocialPublishPanelProps) {
   const [loadingMeta, setLoadingMeta] = useState(true);
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [generatingCopy, setGeneratingCopy] = useState(false);
   const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setClip(initialClip);
+  }, [initialClip]);
 
   useEffect(() => {
     if (!readyExports.length) {
@@ -297,11 +663,64 @@ export function SocialPublishPanel({ exports }: SocialPublishPanelProps) {
     }));
   };
 
+  const applyClipCopyToUniversalFields = (source: Clip) => {
+    const title = cleanText(source.title_options?.[0] || source.title || "");
+    const hashtagsArray = source.hashtag_options?.[0] || source.hashtags || [];
+    const hashtags = hashtagsArray.join(" ").trim();
+    const caption = [title, hashtags].filter(Boolean).join("\n\n");
+    const description = descriptionFromTranscript(source.transcript_text);
+
+    setUniversalFields((previous) => ({
+      ...previous,
+      title,
+      caption,
+      description,
+      hashtags,
+    }));
+  };
+
+  const handleGenerateCopy = async () => {
+    setError(null);
+    setMessage(null);
+
+    const hasStoredCopy =
+      clip.copy_generation_status === "ready" &&
+      Array.isArray(clip.title_options) &&
+      clip.title_options.length > 0 &&
+      Array.isArray(clip.hashtag_options) &&
+      clip.hashtag_options.length > 0;
+
+    if (hasStoredCopy) {
+      applyClipCopyToUniversalFields(clip);
+      setMessage("Filled fields from existing AI clip copy.");
+      return;
+    }
+
+    setGeneratingCopy(true);
+    try {
+      const updatedClip = await api.post<Clip>(`/api/clips/${clip.id}/generate-copy`, {});
+      setClip(updatedClip);
+      onClipUpdate?.(updatedClip);
+      applyClipCopyToUniversalFields(updatedClip);
+      setMessage("Generated clip copy and filled title, caption, and description.");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "AI copy generation is unavailable right now.");
+    } finally {
+      setGeneratingCopy(false);
+    }
+  };
+
   const handleCreatePublishJobs = async () => {
     if (!selectedExportId) {
       setError("Select a ready export before publishing.");
       return;
     }
+
+    const universalPayload = toPayloadFields({
+      ...universalFields,
+      privacy: "",
+    });
+    const universalPrivacy = normalizeText(universalFields.privacy)?.toLowerCase() || null;
 
     const targets = PLATFORM_ORDER.flatMap((platform) => {
       const draft = targetDrafts[platform];
@@ -311,8 +730,38 @@ export function SocialPublishPanel({ exports }: SocialPublishPanelProps) {
         platform,
         connected_account_id: draft.connected_account_id,
       };
-      if (draft.use_override && hasAnyOverrideValue(draft.override)) {
-        target.override = toPayloadFields(draft.override);
+
+      const privacyOptions = PRIVACY_OPTIONS_BY_PLATFORM[platform] || [];
+      let overridePayload: PublishPayloadFields | null = draft.use_override && hasAnyOverrideValue(draft.override)
+        ? toPayloadFields(draft.override)
+        : null;
+
+      const overridePrivacy = draft.use_override ? normalizeText(draft.override.privacy)?.toLowerCase() || null : null;
+      if (privacyOptions.length) {
+        const resolvedPrivacy = overridePrivacy ?? universalPrivacy;
+        if (resolvedPrivacy) {
+          overridePayload = {
+            caption: overridePayload?.caption ?? null,
+            title: overridePayload?.title ?? null,
+            description: overridePayload?.description ?? null,
+            hashtags: overridePayload?.hashtags ?? null,
+            privacy: resolvedPrivacy,
+            scheduled_for: overridePayload?.scheduled_for ?? null,
+          };
+        }
+      } else if (overridePayload?.privacy) {
+        overridePayload = {
+          caption: overridePayload?.caption ?? null,
+          title: overridePayload?.title ?? null,
+          description: overridePayload?.description ?? null,
+          hashtags: overridePayload?.hashtags ?? null,
+          privacy: null,
+          scheduled_for: overridePayload?.scheduled_for ?? null,
+        };
+      }
+
+      if (overridePayload) {
+        target.override = overridePayload;
       }
       return [target];
     });
@@ -328,7 +777,7 @@ export function SocialPublishPanel({ exports }: SocialPublishPanelProps) {
     try {
       const created = await api.post<SocialPublishJob[]>("/api/social/publish", {
         export_id: selectedExportId,
-        universal: toPayloadFields(universalFields),
+        universal: universalPayload,
         targets,
       });
       setMessage(`Created ${created.length} publish job(s).`);
@@ -354,6 +803,11 @@ export function SocialPublishPanel({ exports }: SocialPublishPanelProps) {
       setRetryingJobId(null);
     }
   };
+
+  const anyScheduleCapableProvider = useMemo(
+    () => providers.some((provider) => provider.capabilities?.supports_schedule),
+    [providers]
+  );
 
   return (
     <div className="space-y-5">
@@ -404,6 +858,19 @@ export function SocialPublishPanel({ exports }: SocialPublishPanelProps) {
 
       <div className="rounded-md border border-slate-700 bg-slate-900/40 p-3">
         <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-300">Universal Content</h4>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => void handleGenerateCopy()}
+            disabled={generatingCopy}
+            className="rounded-md border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-800 disabled:opacity-60"
+          >
+            {generatingCopy ? "Generating..." : "Generate Copy"}
+          </button>
+          <p className="text-xs text-slate-500">
+            Fills title, caption, and description from this clip&apos;s AI copy.
+          </p>
+        </div>
         <div className="mt-3 grid gap-3 md:grid-cols-2">
           <label className="text-xs text-slate-400">
             Title
@@ -413,15 +880,39 @@ export function SocialPublishPanel({ exports }: SocialPublishPanelProps) {
               className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-[#7C3AED] focus:outline-none"
             />
           </label>
-          <label className="text-xs text-slate-400">
-            Privacy
-            <input
-              value={universalFields.privacy}
-              onChange={(event) => setUniversalFields((prev) => ({ ...prev, privacy: event.target.value }))}
-              placeholder="private/public/unlisted"
-              className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-[#7C3AED] focus:outline-none"
-            />
-          </label>
+          <div className="text-xs text-slate-400">
+            YouTube Privacy (default)
+            <div className="mt-1 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setUniversalFields((prev) => ({ ...prev, privacy: "" }))}
+                className={`rounded-full border px-3 py-1 text-xs ${
+                  !universalFields.privacy
+                    ? "border-[#7C3AED] bg-[#7C3AED]/20 text-[#C4B5FD]"
+                    : "border-slate-700 text-slate-300 hover:bg-slate-800"
+                }`}
+              >
+                Not set
+              </button>
+              {(PRIVACY_OPTIONS_BY_PLATFORM.youtube || []).map((option) => (
+                <button
+                  key={`universal-privacy-${option.value}`}
+                  type="button"
+                  onClick={() => setUniversalFields((prev) => ({ ...prev, privacy: option.value }))}
+                  className={`rounded-full border px-3 py-1 text-xs ${
+                    universalFields.privacy === option.value
+                      ? "border-[#7C3AED] bg-[#7C3AED]/20 text-[#C4B5FD]"
+                      : "border-slate-700 text-slate-300 hover:bg-slate-800"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1 text-[11px] text-slate-500">
+              Applied only to providers that support privacy controls.
+            </p>
+          </div>
           <label className="text-xs text-slate-400 md:col-span-2">
             Caption
             <textarea
@@ -449,17 +940,19 @@ export function SocialPublishPanel({ exports }: SocialPublishPanelProps) {
               className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-[#7C3AED] focus:outline-none"
             />
           </label>
-          <label className="text-xs text-slate-400">
+          <div className="text-xs text-slate-400">
             Schedule Time (optional)
-            <input
-              type="datetime-local"
+            <SchedulePicker
               value={universalFields.scheduled_for}
-              onChange={(event) =>
-                setUniversalFields((prev) => ({ ...prev, scheduled_for: event.target.value }))
+              onChange={(next) => setUniversalFields((prev) => ({ ...prev, scheduled_for: next }))}
+              disabled={!anyScheduleCapableProvider}
+              disabledReason={
+                anyScheduleCapableProvider
+                  ? "Applies only to providers that support scheduling."
+                  : "Scheduling is unavailable because no loaded provider supports it."
               }
-              className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-[#7C3AED] focus:outline-none"
             />
-          </label>
+          </div>
         </div>
       </div>
 
@@ -471,7 +964,10 @@ export function SocialPublishPanel({ exports }: SocialPublishPanelProps) {
           const latestJob = latestJobsByPlatform.get(platform);
           const providerName = provider?.display_name || platform;
           const providerReady = provider?.setup_status === "ready";
+          const providerSupportsSchedule = Boolean(provider?.capabilities?.supports_schedule);
           const hasConnectedAccounts = platformAccounts.length > 0;
+          const privacyOptions = PRIVACY_OPTIONS_BY_PLATFORM[platform] || [];
+          const reconnectRequired = isReconnectRequiredXJob(latestJob);
 
           return (
             <div key={platform} className="rounded-md border border-slate-700 bg-slate-900/30 p-3">
@@ -502,9 +998,9 @@ export function SocialPublishPanel({ exports }: SocialPublishPanelProps) {
                     ? `${platformAccounts.length} account(s) connected`
                     : "No connected accounts. Connect one first."}
               </p>
-              {platform === "x" ? (
-                <p className="mt-1 text-xs text-amber-300">
-                  X is text-only in this pass. Media/video upload is deferred.
+              {platform === "threads" ? (
+                <p className="mt-1 text-[11px] text-slate-500">
+                  Threads currently publishes text posts. Media/video publish is deferred.
                 </p>
               ) : null}
 
@@ -549,11 +1045,37 @@ export function SocialPublishPanel({ exports }: SocialPublishPanelProps) {
                   </label>
                   <label className="text-xs text-slate-400">
                     Privacy
-                    <input
-                      value={draft.override.privacy}
-                      onChange={(event) => handleOverrideFieldChange(platform, "privacy", event.target.value)}
-                      className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-[#7C3AED] focus:outline-none"
-                    />
+                    {privacyOptions.length ? (
+                      <div className="mt-1 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleOverrideFieldChange(platform, "privacy", "")}
+                          className={`rounded-full border px-3 py-1 text-xs ${
+                            !draft.override.privacy
+                              ? "border-[#7C3AED] bg-[#7C3AED]/20 text-[#C4B5FD]"
+                              : "border-slate-700 text-slate-300 hover:bg-slate-800"
+                          }`}
+                        >
+                          Use default
+                        </button>
+                        {privacyOptions.map((option) => (
+                          <button
+                            key={`${platform}-privacy-${option.value}`}
+                            type="button"
+                            onClick={() => handleOverrideFieldChange(platform, "privacy", option.value)}
+                            className={`rounded-full border px-3 py-1 text-xs ${
+                              draft.override.privacy === option.value
+                                ? "border-[#7C3AED] bg-[#7C3AED]/20 text-[#C4B5FD]"
+                                : "border-slate-700 text-slate-300 hover:bg-slate-800"
+                            }`}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-1 text-[11px] text-slate-500">Privacy is not configurable for this provider.</p>
+                    )}
                   </label>
                   <label className="text-xs text-slate-400 md:col-span-2">
                     Caption
@@ -581,19 +1103,35 @@ export function SocialPublishPanel({ exports }: SocialPublishPanelProps) {
                       className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-[#7C3AED] focus:outline-none"
                     />
                   </label>
-                  <label className="text-xs text-slate-400">
+                  <div className="text-xs text-slate-400">
                     Schedule Time
-                    <input
-                      type="datetime-local"
+                    <SchedulePicker
                       value={draft.override.scheduled_for}
-                      onChange={(event) => handleOverrideFieldChange(platform, "scheduled_for", event.target.value)}
-                      className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-[#7C3AED] focus:outline-none"
+                      onChange={(next) => handleOverrideFieldChange(platform, "scheduled_for", next)}
+                      disabled={!providerSupportsSchedule}
+                      disabledReason={
+                        providerSupportsSchedule ? undefined : "Scheduling is not supported for this provider."
+                      }
                     />
-                  </label>
+                  </div>
                 </div>
               ) : null}
 
               {latestJob?.error_message ? <p className="mt-3 text-xs text-red-400">{latestJob.error_message}</p> : null}
+              {platform === "x" && reconnectRequired ? (
+                <p className="mt-1 text-[11px] text-amber-300">
+                  Reconnect X in{" "}
+                  <Link href="/connections" className="underline hover:text-amber-200">
+                    Connections
+                  </Link>{" "}
+                  to grant media permissions, then publish again.
+                </p>
+              ) : null}
+              {platform === "x" && latestJob?.error_message && !reconnectRequired ? (
+                <p className="mt-1 text-[11px] text-amber-300">
+                  X media posting can fail due to account-tier limits, provider credits, or media policy restrictions.
+                </p>
+              ) : null}
               {latestJob?.external_post_url ? (
                 <a
                   href={latestJob.external_post_url}
@@ -604,7 +1142,9 @@ export function SocialPublishPanel({ exports }: SocialPublishPanelProps) {
                   Open published post
                 </a>
               ) : null}
-              {latestJob && (latestJob.status === "failed" || latestJob.status === "provider_not_configured") ? (
+              {latestJob &&
+              (latestJob.status === "failed" || latestJob.status === "provider_not_configured") &&
+              !reconnectRequired ? (
                 <button
                   type="button"
                   onClick={() => void handleRetry(latestJob.id)}
