@@ -36,6 +36,13 @@ def build_provider_setup_details(
         "callback_url": callback_url,
         "callback_error": callback_error,
         "credential_source": credentials.source,
+        "credential_rejections": [
+            {"source": item.source, "reason": item.reason}
+            for item in credentials.rejected_sources
+        ],
+        "fallback_in_use": credentials.source == "META_APP_ID/META_APP_SECRET"
+        and len(credentials.rejected_sources) > 0,
+        "validation_warning": credentials.validation_warning,
         "required_scopes": required_scopes,
         "supports_publish": supports_publish,
         "notes": notes,
