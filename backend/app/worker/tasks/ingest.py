@@ -151,8 +151,10 @@ def ingest_job(self, video_id: str):
             **_yt_dlp_common_options(),
             "outtmpl": f"/tmp/{video_id}/%(ext)s",
             "format": (
-                "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/"
-                "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
+                "bestvideo[height<=1080]+bestaudio/"
+                "best[height<=1080]/"
+                "bestvideo+bestaudio/"
+                "best"
             ),
             "merge_output_format": "mp4",
         }
