@@ -45,6 +45,7 @@ export interface VideoListItem {
   clip_count: number;
   created_at: string;
   thumbnail_url: string | null;
+  error_message: string | null;
 }
 
 export interface TranscriptSegmentPayload {

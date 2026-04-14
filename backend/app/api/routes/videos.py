@@ -1,8 +1,9 @@
 import json
 import logging
+import re
 import uuid
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,7 +41,8 @@ ALLOWED_VIDEO_TYPES = {
     "video/x-matroska",
 }
 MAX_UPLOAD_BYTES = 5_368_709_120
-ALLOWED_YOUTUBE_DOMAINS = {"youtube.com", "youtu.be"}
+ALLOWED_YOUTUBE_DOMAINS = {"youtube.com", "m.youtube.com", "youtu.be"}
+YOUTUBE_VIDEO_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
 
 def _file_ext_from_upload(filename: str, content_type: str) -> str:
@@ -62,24 +64,44 @@ def _title_from_filename(filename: str) -> str:
     return stem or "Untitled"
 
 
-def _is_valid_youtube_url(value: str) -> bool:
+def _normalize_youtube_video_url(value: str) -> str:
     try:
         parsed = urlparse(value)
-    except Exception:
-        return False
+    except Exception as exc:
+        raise ValueError("Please enter a valid YouTube URL.") from exc
 
     if parsed.scheme not in {"http", "https"}:
-        return False
+        raise ValueError("Please enter a valid YouTube URL.")
     if not parsed.netloc:
-        return False
+        raise ValueError("Please enter a valid YouTube URL.")
 
-    host = parsed.netloc.lower()
+    host = parsed.netloc.lower().split(":", 1)[0]
     if host.startswith("www."):
         host = host[4:]
 
-    if host in ALLOWED_YOUTUBE_DOMAINS:
-        return True
-    return host.endswith(".youtube.com") or host.endswith(".youtu.be")
+    if host not in ALLOWED_YOUTUBE_DOMAINS:
+        raise ValueError("Only youtube.com, m.youtube.com, or youtu.be links are supported.")
+
+    query = parse_qs(parsed.query)
+    if query.get("list"):
+        raise ValueError("Playlist URLs are not supported yet. Please paste a single video URL.")
+
+    path_parts = [segment for segment in parsed.path.split("/") if segment]
+    video_id: str | None = None
+
+    if host == "youtu.be":
+        video_id = path_parts[0] if path_parts else None
+    elif parsed.path == "/watch":
+        video_id = (query.get("v") or [None])[0]
+    elif len(path_parts) >= 2 and path_parts[0] == "shorts":
+        video_id = path_parts[1]
+
+    if not video_id:
+        raise ValueError("Please paste a direct YouTube video link (watch, youtu.be, or shorts).")
+    if not YOUTUBE_VIDEO_ID_PATTERN.fullmatch(video_id):
+        raise ValueError("Invalid YouTube video ID in URL.")
+
+    return f"https://www.youtube.com/watch?v={video_id}"
 
 
 @router.post("/videos/upload-url", response_model=VideoUploadUrlResponse)
@@ -170,24 +192,26 @@ async def import_youtube(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    url = body.url.strip()
-    if not _is_valid_youtube_url(url):
+    raw_url = body.url.strip()
+    try:
+        normalized_url = _normalize_youtube_video_url(raw_url)
+    except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only valid youtube.com or youtu.be URLs are allowed",
+            detail=str(exc),
         )
 
     video = Video(
         user_id=current_user.id,
         source_type=VideoSourceType.youtube,
-        source_url=url,
+        source_url=normalized_url,
         status=VideoStatus.downloading,
         title="Importing...",
     )
     db.add(video)
     await db.flush()
 
-    job = Job(video_id=video.id, type="ingest", status=JobStatus.queued, payload={"url": url})
+    job = Job(video_id=video.id, type="ingest", status=JobStatus.queued, payload={"url": normalized_url})
     db.add(job)
     await db.flush()
     await db.commit()
@@ -274,6 +298,7 @@ async def list_videos(
             clip_count=video.clip_count,
             created_at=video.created_at,
             thumbnail_url=thumbnail_urls_by_video_id.get(video.id),
+            error_message=video.error_message,
         )
         for video in videos
     ]

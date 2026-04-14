@@ -17,6 +17,58 @@ from app.worker.tasks.transcribe import transcribe_job
 
 logger = logging.getLogger(__name__)
 
+YTDLP_EXTRACTOR_ARGS = {
+    "youtube": {
+        "player_client": ["android", "web"],
+    }
+}
+
+
+def _yt_dlp_common_options() -> dict:
+    return {
+        "quiet": False,
+        "no_warnings": False,
+        "extract_flat": False,
+        "ignoreerrors": False,
+        "noplaylist": True,
+        "socket_timeout": 45,
+        "retries": 5,
+        "fragment_retries": 5,
+        "extractor_args": YTDLP_EXTRACTOR_ARGS,
+        "http_headers": {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/122.0.0.0 Safari/537.36"
+            )
+        },
+    }
+
+
+def _map_download_error(error_msg: str) -> str:
+    error_lower = error_msg.lower()
+    if any(
+        marker in error_lower
+        for marker in [
+            "sign in",
+            "sign-in",
+            "login required",
+            "confirm you're not a bot",
+            "bot",
+            "human verification",
+        ]
+    ):
+        return "This video currently requires sign-in or bot verification to download."
+    if any(marker in error_lower for marker in ["private video", "private"]):
+        return "This video is private and cannot be imported."
+    if any(marker in error_lower for marker in ["video unavailable", "unavailable"]):
+        return "This video is unavailable."
+    if any(marker in error_lower for marker in ["age-restricted", "confirm your age", "age restriction"]):
+        return "This video is age-restricted and cannot be imported in this flow."
+    if any(marker in error_lower for marker in ["not available in your country", "geo-restricted", "geoblocked"]):
+        return "This video is geo-restricted and cannot be imported from the server region."
+    return f"Could not download video: {error_msg[:200]}"
+
 
 def _latest_ingest_job(db, video_uuid: uuid.UUID) -> Job | None:
     return (
@@ -82,21 +134,7 @@ def ingest_job(self, video_id: str):
 
             source_url = video.source_url
 
-        info_opts = {
-            "quiet": False,
-            "no_warnings": False,
-            "extract_flat": False,
-            "ignoreerrors": False,
-            "socket_timeout": 30,
-            "retries": 3,
-            "http_headers": {
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                )
-            },
-        }
+        info_opts = _yt_dlp_common_options()
         with yt_dlp.YoutubeDL(info_opts) as ydl:
             info = ydl.extract_info(source_url, download=False)
 
@@ -110,25 +148,13 @@ def ingest_job(self, video_id: str):
 
         tmp_dir.mkdir(parents=True, exist_ok=True)
         ydl_opts = {
+            **_yt_dlp_common_options(),
             "outtmpl": f"/tmp/{video_id}/%(ext)s",
             "format": (
                 "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/"
                 "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
             ),
             "merge_output_format": "mp4",
-            "quiet": False,
-            "no_warnings": False,
-            "extract_flat": False,
-            "ignoreerrors": False,
-            "socket_timeout": 30,
-            "retries": 3,
-            "http_headers": {
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                )
-            },
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -188,15 +214,7 @@ def ingest_job(self, video_id: str):
 
     except DownloadError as exc:
         error_msg = str(exc)
-        error_lower = error_msg.lower()
-        if "sign in" in error_lower:
-            user_message = "This video requires sign-in to download. Try a different URL."
-        elif "private video" in error_lower:
-            user_message = "This video is private and cannot be imported."
-        elif "video unavailable" in error_lower:
-            user_message = "This video is unavailable."
-        else:
-            user_message = f"Could not download video: {error_msg[:200]}"
+        user_message = _map_download_error(error_msg)
 
         logger.error(f"[ingest] yt-dlp download failed for {video_id}: {error_msg}", exc_info=True)
         _mark_video_and_job_failed(video_uuid, user_message)

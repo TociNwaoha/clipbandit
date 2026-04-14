@@ -71,6 +71,7 @@ class VideoListItem(BaseModel):
     clip_count: int
     created_at: datetime
     thumbnail_url: str | None
+    error_message: str | None
 
 
 class VideoStatusResponse(BaseModel):

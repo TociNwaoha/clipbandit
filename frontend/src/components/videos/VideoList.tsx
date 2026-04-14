@@ -188,6 +188,9 @@ export function VideoList({ videos, loading, error, onRefresh, onOpenUpload }: V
                   {video.clip_count > 0 && <span>{video.clip_count} clips</span>}
                   <span>{formatRelativeTime(video.created_at)}</span>
                 </div>
+                {video.status === "error" && video.error_message ? (
+                  <p className="mt-2 text-xs text-red-300">{video.error_message}</p>
+                ) : null}
               </div>
             </Link>
 
