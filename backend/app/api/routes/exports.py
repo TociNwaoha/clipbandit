@@ -83,7 +83,7 @@ def _share_description(clip: Clip | None, video: Video | None) -> str:
         return clip.title.strip()
     if video and video.title:
         return video.title.strip()
-    return "Shared from ClipBandit."
+    return "Shared from PostBandit."
     try:
         return r2_client.get_presigned_download_url(clip.thumbnail_key)
     except Exception as exc:
@@ -246,7 +246,7 @@ async def get_public_export_share(
     if not media_url:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share export not found")
 
-    title = (clip.title or video.title or "ClipBandit Share").strip()
+    title = (clip.title or video.title or "PostBandit Share").strip()
     share_url = f"{settings.frontend_public_url.rstrip('/')}/share/exports/{export.id}"
 
     return PublicExportShareResponse(

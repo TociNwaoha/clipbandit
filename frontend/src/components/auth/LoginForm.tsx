@@ -7,12 +7,17 @@ import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 
-export function LoginForm() {
+interface LoginFormProps {
+  googleEnabled?: boolean;
+}
+
+export function LoginForm({ googleEnabled = false }: LoginFormProps) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -39,10 +44,17 @@ export function LoginForm() {
     }
   }
 
+  async function handleGoogleSignIn() {
+    setError("");
+    setGoogleLoading(true);
+    await signIn("google", { callbackUrl: "/dashboard" });
+    setGoogleLoading(false);
+  }
+
   return (
     <Card>
       <h2 className="text-lg font-semibold text-white mb-1">Sign in</h2>
-      <p className="text-slate-400 text-sm mb-6">Welcome back to ClipBandit</p>
+      <p className="text-slate-400 text-sm mb-6">Welcome back to PostBandit</p>
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <Input
@@ -74,6 +86,27 @@ export function LoginForm() {
           Sign in
         </Button>
       </form>
+
+      {googleEnabled && (
+        <>
+          <div className="my-5 flex items-center gap-3">
+            <div className="h-px flex-1 bg-slate-700" />
+            <span className="text-xs uppercase tracking-wide text-slate-400">Or</span>
+            <div className="h-px flex-1 bg-slate-700" />
+          </div>
+
+          <Button
+            type="button"
+            variant="secondary"
+            size="lg"
+            className="w-full"
+            loading={googleLoading}
+            onClick={handleGoogleSignIn}
+          >
+            Continue with Google
+          </Button>
+        </>
+      )}
     </Card>
   );
 }

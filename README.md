@@ -1,6 +1,6 @@
-# ClipBandit
+# PostBandit
 
-ClipBandit takes long-form videos (podcasts, sermons, YouTube videos) and automatically generates short viral clips with captions. Built for churches and solo creators who want OpusClip-quality output at a fraction of the cost.
+PostBandit takes long-form videos (podcasts, sermons, YouTube videos) and automatically generates short viral clips with captions. Built for churches and solo creators who want OpusClip-quality output at a fraction of the cost.
 
 ## Prerequisites
 
@@ -27,6 +27,24 @@ docker-compose up --build
 | Health Check | http://localhost:8000/health |
 
 Default login: `admin@clipbandit.com` / `changeme123`
+
+## Google OAuth Login Config
+
+To enable Google sign-in on `/login`:
+
+- Set `GOOGLE_CLIENT_ID`
+- Set `GOOGLE_CLIENT_SECRET`
+
+Required Google Console OAuth redirect URIs:
+
+- `https://postbandit.com/api/auth/callback/google`
+- `http://localhost:3001/api/auth/callback/google`
+
+Notes:
+
+- Google login exchanges the Google `id_token` for a backend JWT via `/api/auth/google/login`.
+- New Google users are auto-created as `starter` tier.
+- Existing email/password login stays unchanged.
 
 ## YouTube OAuth Provider Config
 
@@ -70,7 +88,7 @@ To enable real Instagram professional-account connection + publishing:
   - or use shared fallback `META_APP_ID` and `META_APP_SECRET`
 - Set `SOCIAL_TOKEN_ENCRYPTION_KEY` (required for encrypted token storage)
 - Set `BACKEND_PUBLIC_URL` to your externally reachable backend URL
-- Optional: set `META_GRAPH_API_VERSION` (default `v21.0`)
+- Ensure your Meta app has **Instagram Login** enabled for this provider flow
 
 Instagram callback URI must match:
 
@@ -78,8 +96,10 @@ Instagram callback URI must match:
 
 Notes:
 
+- Instagram provider now uses the Instagram Login model directly (not Facebook `/me/accounts` Page discovery).
 - Instagram integration targets **Business/Creator** accounts only.
-- If OAuth succeeds but no professional Instagram account is returned, ClipBandit fails honestly and asks for reconnect with the correct account.
+- Instagram and Facebook are separate provider paths: Facebook handles Pages; Instagram handles Instagram professional account connect/publish.
+- If OAuth succeeds but no professional Instagram account is returned, PostBandit fails honestly and asks for reconnect with the correct account.
 
 ## Threads Provider Config
 

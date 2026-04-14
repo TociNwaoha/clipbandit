@@ -22,14 +22,14 @@ export async function generateMetadata({ params }: SharePageProps): Promise<Meta
   const data = await fetchShareData(params.exportId);
   if (!data) {
     return {
-      title: "Clip Share | ClipBandit",
-      description: "Shared clip from ClipBandit",
+      title: "Clip Share | PostBandit",
+      description: "Shared clip from PostBandit",
       robots: { index: false, follow: true },
     };
   }
 
   return {
-    title: `${data.title} | ClipBandit`,
+    title: `${data.title} | PostBandit`,
     description: data.description,
     openGraph: {
       title: data.title,
@@ -57,7 +57,7 @@ export default async function PublicExportSharePage({ params }: SharePageProps) 
     <main className="min-h-screen bg-[#0F172A] px-4 py-10 text-white">
       <div className="mx-auto max-w-3xl space-y-6 rounded-xl border border-slate-800 bg-slate-900/50 p-6">
         <div className="space-y-2">
-          <p className="text-xs uppercase tracking-wide text-slate-400">ClipBandit Share</p>
+          <p className="text-xs uppercase tracking-wide text-slate-400">PostBandit Share</p>
           <h1 className="text-2xl font-semibold text-white">{data.title}</h1>
           <p className="text-sm text-slate-300">{data.description}</p>
         </div>
@@ -74,7 +74,7 @@ export default async function PublicExportSharePage({ params }: SharePageProps) 
         </video>
 
         <div className="text-xs text-slate-400">
-          <p>Shared via ClipBandit</p>
+          <p>Shared via PostBandit</p>
         </div>
       </div>
     </main>

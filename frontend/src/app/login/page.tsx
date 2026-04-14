@@ -1,6 +1,9 @@
 import { LoginForm } from "@/components/auth/LoginForm";
+import Link from "next/link";
 
 export default function LoginPage() {
+  const googleEnabled = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+
   return (
     <main className="min-h-screen flex items-center justify-center bg-[#0F172A] px-4">
       <div className="w-full max-w-md">
@@ -12,12 +15,18 @@ export default function LoginPage() {
                 <path d="M5 3L19 12L5 21V3Z" fill="white" />
               </svg>
             </div>
-            <span className="text-2xl font-bold tracking-tight text-white">ClipBandit</span>
+            <span className="text-2xl font-bold tracking-tight text-white">PostBandit</span>
           </div>
-          <p className="text-slate-400 text-sm">AI-powered video clipping for creators</p>
+          <p className="text-slate-400 text-sm">AI-powered clipping and social publishing for creators</p>
         </div>
 
-        <LoginForm />
+        <LoginForm googleEnabled={googleEnabled} />
+
+        <div className="mt-6 text-center text-sm text-slate-400">
+          <Link href="/privacy-policy" className="text-slate-300 hover:text-white underline underline-offset-4">
+            Privacy Policy
+          </Link>
+        </div>
       </div>
     </main>
   );

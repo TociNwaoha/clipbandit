@@ -89,7 +89,7 @@ export function Sidebar() {
             <path d="M5 3L19 12L5 21V3Z" fill="white" />
           </svg>
         </div>
-        <span className="text-base font-bold tracking-tight text-white">ClipBandit</span>
+        <span className="text-base font-bold tracking-tight text-white">PostBandit</span>
       </div>
 
       {/* Nav */}

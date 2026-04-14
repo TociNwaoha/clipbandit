@@ -323,7 +323,7 @@ class FacebookAdapter(SocialProviderAdapter):
         description_parts = [item.strip() for item in [payload.description, payload.caption] if item and item.strip()]
         if payload.hashtags:
             description_parts.append(" ".join(payload.hashtags))
-        description = "\n\n".join(description_parts).strip() or title or "Published via ClipBandit"
+        description = "\n\n".join(description_parts).strip() or title or "Published via PostBandit"
 
         try:
             with httpx.Client(timeout=120) as client:

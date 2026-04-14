@@ -1165,7 +1165,7 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
       </Card>
 
       <Card>
-        <SocialPublishPanel exports={exports} />
+        <SocialPublishPanel clip={clip} exports={exports} onClipUpdate={setClip} />
       </Card>
     </div>
   );

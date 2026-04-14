@@ -6,8 +6,8 @@ import { Providers } from "./providers";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "ClipBandit",
-  description: "AI-powered video clipping for creators and churches",
+  title: "PostBandit",
+  description: "AI-powered video clipping and social publishing for creators",
 };
 
 export default function RootLayout({

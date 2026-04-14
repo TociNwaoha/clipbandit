@@ -94,6 +94,7 @@ def resolve_provider_credentials(
     primary_secret_attr: str,
     fallback_id_attr: str = "meta_app_id",
     fallback_secret_attr: str = "meta_app_secret",
+    validate_with_client_credentials: bool = True,
 ) -> ProviderCredentials:
     primary_id = getattr(settings, primary_id_attr, None)
     primary_secret = getattr(settings, primary_secret_attr, None)
@@ -131,6 +132,26 @@ def resolve_provider_credentials(
 
     rejected_sources: list[CredentialRejection] = []
     validation_warning: str | None = None
+
+    if not validate_with_client_credentials:
+        if candidate_specs:
+            client_id, client_secret, id_env, secret_env = candidate_specs[0]
+            return ProviderCredentials(
+                client_id=client_id,
+                client_secret=client_secret,
+                source=f"{id_env}/{secret_env}",
+                missing_fields=sorted(set(missing_fields)),
+                rejected_sources=[],
+                validation_warning="Credential preflight skipped for provider",
+            )
+        return ProviderCredentials(
+            client_id=None,
+            client_secret=None,
+            source=None,
+            missing_fields=sorted(set(missing_fields)),
+            rejected_sources=[],
+            validation_warning=None,
+        )
 
     for client_id, client_secret, id_env, secret_env in candidate_specs:
         source = f"{id_env}/{secret_env}"

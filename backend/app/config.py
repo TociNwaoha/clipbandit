@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     nextauth_url: str = "http://localhost:3001"
     admin_email: str = "admin@clipbandit.com"
     admin_password: str = "changeme123"
+    google_client_id: str = "placeholder"
+    google_client_secret: str = "placeholder"
 
     # JWT
     jwt_secret_key: str = "changeme-jwt-secret-key-32-chars-min"

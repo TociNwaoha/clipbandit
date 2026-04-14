@@ -970,7 +970,7 @@ export function SocialPublishPanel({ exports, clip: initialClip, onClipUpdate }:
             <input
               value={universalFields.hashtags}
               onChange={(event) => setUniversalFields((prev) => ({ ...prev, hashtags: event.target.value }))}
-              placeholder="#clipbandit #podcast"
+              placeholder="#postbandit #podcast"
               className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-[#7C3AED] focus:outline-none"
             />
           </label>

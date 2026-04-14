@@ -10,6 +10,7 @@ def build_provider_setup_details(
     platform_value: str,
     primary_id_attr: str,
     primary_secret_attr: str,
+    validate_with_client_credentials: bool = True,
     required_scopes: list[str],
     notes: str,
     supports_publish: bool,
@@ -17,6 +18,7 @@ def build_provider_setup_details(
     credentials = resolve_provider_credentials(
         primary_id_attr=primary_id_attr,
         primary_secret_attr=primary_secret_attr,
+        validate_with_client_credentials=validate_with_client_credentials,
     )
     callback_url, callback_error, callback_missing = build_callback_url(platform_value)
 

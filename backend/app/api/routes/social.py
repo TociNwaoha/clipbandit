@@ -276,6 +276,15 @@ async def list_social_providers(
                 "facebook_account_count": facebook_account_count,
                 "facebook_page_count": facebook_page_count,
             }
+        if adapter.platform == SocialPlatform.instagram:
+            instagram_professional_count = destination_counts["instagram"].get("instagram_professional", 0)
+            setup_details = {
+                **setup_details,
+                "login_model": "instagram_login",
+                "connect_ready": setup_status == "ready",
+                "publish_ready": setup_status == "ready" and instagram_professional_count > 0,
+                "instagram_professional_count": instagram_professional_count,
+            }
 
         logger.info(
             "[social] provider readiness platform=%s status=%s missing_fields=%s",
@@ -574,6 +583,13 @@ async def create_publish_jobs(
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Automated Facebook publishing requires a connected Facebook Page destination.",
+                )
+        if target.platform == SocialPlatform.instagram:
+            destination_type = _destination_type_for_account(account)
+            if destination_type != "instagram_professional":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Instagram publishing requires a connected Instagram professional account. Reconnect Instagram.",
                 )
 
         content = _merge_content(body.universal, target.override)

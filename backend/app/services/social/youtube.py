@@ -298,7 +298,7 @@ class YouTubeAdapter(SocialProviderAdapter):
             updated_access_token = refreshed_token
             updated_token_expires_at = refreshed_expiry
 
-        title = (payload.title or payload.caption or "ClipBandit Export").strip()[:100]
+        title = (payload.title or payload.caption or "PostBandit Export").strip()[:100]
         description_parts = [part.strip() for part in [payload.description, payload.caption] if part and part.strip()]
         if payload.hashtags:
             description_parts.append(" ".join(payload.hashtags))

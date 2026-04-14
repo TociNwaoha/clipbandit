@@ -27,29 +27,25 @@ from app.services.social.types import (
 INSTAGRAM_SCOPES = [
     "instagram_business_basic",
     "instagram_business_content_publish",
-    "pages_show_list",
 ]
 
 INSTAGRAM_ACCOUNT_FIELDS = "id,username,name,account_type,profile_picture_url"
-PAGE_IG_FIELDS = (
-    "id,name,access_token,"
-    "instagram_business_account{id,username,name,account_type,profile_picture_url}"
-)
+INSTAGRAM_ACCOUNT_FIELDS_FALLBACK = "id,username"
 
 IG_CONTAINER_POLL_SECONDS = 4
 IG_CONTAINER_MAX_WAIT_SECONDS = 180
 
 
 def _graph_base() -> str:
-    return f"https://graph.facebook.com/{settings.meta_graph_api_version}"
+    return "https://graph.instagram.com"
 
 
 def _auth_url() -> str:
-    return f"https://www.facebook.com/{settings.meta_graph_api_version}/dialog/oauth"
+    return "https://www.instagram.com/oauth/authorize"
 
 
 def _token_url() -> str:
-    return f"{_graph_base()}/oauth/access_token"
+    return "https://api.instagram.com/oauth/access_token"
 
 
 def _extract_scopes(token_data: dict) -> list[str]:
@@ -72,7 +68,7 @@ def _extract_scopes(token_data: dict) -> list[str]:
     return list(INSTAGRAM_SCOPES)
 
 
-def _normalize_profile(profile: dict, *, source: str, linked_page: dict | None = None) -> dict:
+def _normalize_profile(profile: dict, *, source: str) -> dict:
     metadata = {
         "provider_family": "meta",
         "destination_type": "instagram_professional",
@@ -88,11 +84,6 @@ def _normalize_profile(profile: dict, *, source: str, linked_page: dict | None =
             "profile_picture_url": profile.get("profile_picture_url"),
         },
     }
-    if linked_page:
-        metadata["linked_page"] = {
-            "id": linked_page.get("id"),
-            "name": linked_page.get("name"),
-        }
     return metadata
 
 
@@ -131,14 +122,23 @@ class InstagramAdapter(SocialProviderAdapter):
         )
 
     def setup_details(self) -> dict:
-        return build_provider_setup_details(
+        details = build_provider_setup_details(
             platform_value=self.platform.value,
             primary_id_attr="instagram_app_id",
             primary_secret_attr="instagram_app_secret",
+            validate_with_client_credentials=False,
             required_scopes=list(INSTAGRAM_SCOPES),
-            notes="Connects Instagram professional (Business/Creator) accounts via Meta OAuth.",
+            notes="Connects Instagram professional (Business/Creator) accounts via Instagram Login.",
             supports_publish=True,
         )
+        details.update(
+            {
+                "login_model": "instagram_login",
+                "connect_ready": details.get("configured", False),
+                "publish_ready": details.get("configured", False),
+            }
+        )
+        return details
 
     def setup_status(self) -> tuple[str, str | None]:
         details = self.setup_details()
@@ -150,6 +150,7 @@ class InstagramAdapter(SocialProviderAdapter):
         return resolve_provider_credentials(
             primary_id_attr="instagram_app_id",
             primary_secret_attr="instagram_app_secret",
+            validate_with_client_credentials=False,
         )
 
     def build_connect_url(self, *, state: str, redirect_uri: str, oauth_context: dict | None = None) -> str:
@@ -186,16 +187,17 @@ class InstagramAdapter(SocialProviderAdapter):
             raise ProviderOperationError("Instagram app credentials are missing")
 
         token_expires_at = None
-        accounts: list[OAuthAccountPayload] = []
+        profile_source = "graph.instagram.com/me"
 
         try:
             with httpx.Client(timeout=30) as client:
-                token_data = graph_get(
+                token_data = graph_post(
                     client,
                     url=_token_url(),
-                    params={
+                    data={
                         "client_id": creds.client_id,
                         "client_secret": creds.client_secret,
+                        "grant_type": "authorization_code",
                         "redirect_uri": redirect_uri,
                         "code": code,
                     },
@@ -209,59 +211,72 @@ class InstagramAdapter(SocialProviderAdapter):
                 if isinstance(expires_in, (int, float)):
                     token_expires_at = utcnow() + timedelta(seconds=int(expires_in))
 
-                pages_data = graph_get(
-                    client,
-                    url=f"{_graph_base()}/me/accounts",
-                    params={
-                        "fields": PAGE_IG_FIELDS,
-                        "access_token": access_token,
-                    },
-                )
+                try:
+                    profile = graph_get(
+                        client,
+                        url=f"{_graph_base()}/me",
+                        params={
+                            "fields": INSTAGRAM_ACCOUNT_FIELDS,
+                            "access_token": access_token,
+                        },
+                    )
+                except GraphRequestError:
+                    profile_source = "graph.instagram.com/me (fallback)"
+                    profile = graph_get(
+                        client,
+                        url=f"{_graph_base()}/me",
+                        params={
+                            "fields": INSTAGRAM_ACCOUNT_FIELDS_FALLBACK,
+                            "access_token": access_token,
+                        },
+                    )
         except GraphRequestError as exc:
             raise ProviderOperationError(f"Instagram OAuth failed: {exc}") from exc
 
-        page_rows = pages_data.get("data")
-        if isinstance(page_rows, list):
-            for page in page_rows:
-                if not isinstance(page, dict):
-                    continue
-                ig_profile = page.get("instagram_business_account")
-                if not isinstance(ig_profile, dict):
-                    continue
-                ig_id = str(ig_profile.get("id") or "").strip()
-                if not ig_id:
-                    continue
-
-                metadata = _normalize_profile(
-                    ig_profile,
-                    source="graph.facebook.com/me/accounts",
-                    linked_page=page,
-                )
-                display_name = str(ig_profile.get("name") or ig_profile.get("username") or "").strip() or None
-                username = str(ig_profile.get("username") or "").strip() or None
-                accounts.append(
-                    OAuthAccountPayload(
-                        external_account_id=ig_id,
-                        display_name=display_name,
-                        username_or_channel_name=username,
-                        access_token=access_token,
-                        refresh_token=None,
-                        token_expires_at=token_expires_at,
-                        scopes=_extract_scopes(token_data),
-                        metadata_json=metadata,
-                    )
-                )
-
-        if not accounts:
+        external_account_id = str(profile.get("id") or token_data.get("user_id") or "").strip()
+        if not external_account_id:
             raise ProviderOperationError(
-                "Instagram OAuth completed, but no professional Instagram account was returned."
+                "Instagram OAuth completed, but account identity was not returned."
             )
+
+        account_type = str(profile.get("account_type") or "").strip().lower()
+        if account_type and all(term not in account_type for term in ("business", "creator", "professional")):
+            raise ProviderOperationError(
+                "Instagram OAuth completed, but the connected account is not a professional (Business/Creator) account."
+            )
+
+        display_name = str(profile.get("name") or profile.get("username") or "").strip() or None
+        username = str(profile.get("username") or "").strip() or None
+        metadata = _normalize_profile(
+            {
+                "id": external_account_id,
+                "username": username,
+                "name": display_name,
+                "account_type": profile.get("account_type"),
+                "profile_picture_url": profile.get("profile_picture_url"),
+            },
+            source=profile_source,
+        )
+
+        accounts = [
+            OAuthAccountPayload(
+                external_account_id=external_account_id,
+                display_name=display_name,
+                username_or_channel_name=username,
+                access_token=access_token,
+                refresh_token=None,
+                token_expires_at=token_expires_at,
+                scopes=_extract_scopes(token_data),
+                metadata_json=metadata,
+            )
+        ]
 
         return OAuthExchangeResult(
             accounts=accounts,
             provider_metadata_json={
-                "destination_count": len(accounts),
+                "destination_count": 1,
                 "destination_type": "instagram_professional",
+                "login_model": "instagram_login",
             },
         )
 
@@ -307,7 +322,7 @@ class InstagramAdapter(SocialProviderAdapter):
             caption_parts.append(" ".join(payload.hashtags))
         caption = "\n\n".join(caption_parts).strip()
         if not caption:
-            caption = (payload.title or "Published via ClipBandit").strip()
+            caption = (payload.title or "Published via PostBandit").strip()
 
         try:
             with httpx.Client(timeout=120) as client:
@@ -393,4 +408,3 @@ class InstagramAdapter(SocialProviderAdapter):
                 "instagram_publish_response": publish_data,
             },
         )
-
