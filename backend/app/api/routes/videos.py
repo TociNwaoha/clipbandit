@@ -229,6 +229,42 @@ async def list_videos(
         .offset(offset)
     )
     videos = result.scalars().all()
+    if not videos:
+        return []
+
+    video_ids = [video.id for video in videos]
+    thumbnail_keys_by_video_id: dict[uuid.UUID, str] = {}
+    thumbnail_urls_by_video_id: dict[uuid.UUID, str] = {}
+
+    thumbnail_result = await db.execute(
+        select(Clip.video_id, Clip.thumbnail_key)
+        .where(
+            Clip.video_id.in_(video_ids),
+            Clip.thumbnail_key.is_not(None),
+        )
+        .order_by(
+            Clip.video_id.asc(),
+            Clip.score.desc().nullslast(),
+            Clip.created_at.asc(),
+        )
+    )
+
+    for video_id, thumbnail_key in thumbnail_result.all():
+        if video_id in thumbnail_keys_by_video_id or not thumbnail_key:
+            continue
+        thumbnail_keys_by_video_id[video_id] = thumbnail_key
+
+    for video_id, thumbnail_key in thumbnail_keys_by_video_id.items():
+        try:
+            thumbnail_urls_by_video_id[video_id] = r2_client.get_presigned_download_url(thumbnail_key)
+        except Exception as exc:
+            logger.warning(
+                "[videos] failed to generate dashboard thumbnail URL for video_id=%s key=%s: %s",
+                video_id,
+                thumbnail_key,
+                exc,
+            )
+
     return [
         VideoListItem(
             id=video.id,
@@ -237,7 +273,7 @@ async def list_videos(
             duration_sec=video.duration_sec,
             clip_count=video.clip_count,
             created_at=video.created_at,
-            thumbnail_url=None,
+            thumbnail_url=thumbnail_urls_by_video_id.get(video.id),
         )
         for video in videos
     ]

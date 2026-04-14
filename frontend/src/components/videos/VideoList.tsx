@@ -66,6 +66,7 @@ export function VideoList({ videos, loading, error, onRefresh, onOpenUpload }: V
   const [menuVideoId, setMenuVideoId] = useState<string | null>(null);
   const [deletingVideoId, setDeletingVideoId] = useState<string | null>(null);
   const [preparingVideoId, setPreparingVideoId] = useState<string | null>(null);
+  const [failedThumbnailUrls, setFailedThumbnailUrls] = useState<Record<string, boolean>>({});
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
@@ -150,11 +151,29 @@ export function VideoList({ videos, loading, error, onRefresh, onOpenUpload }: V
     <div className="space-y-4">
       {actionMessage && <p className="text-sm text-emerald-300">{actionMessage}</p>}
       {deleteError && <p className="text-sm text-red-400">{deleteError}</p>}
-      {sortedVideos.map((video) => (
+      {sortedVideos.map((video) => {
+        const thumbnailUrl = video.thumbnail_url;
+        const showThumbnail = Boolean(thumbnailUrl && !failedThumbnailUrls[thumbnailUrl]);
+
+        return (
         <Card key={video.id} className="relative">
           <div className="flex items-start gap-4">
             <Link href={`/videos/${video.id}`} className="flex min-w-0 flex-1 items-start gap-4 group">
-              <div className="h-20 w-36 rounded-lg bg-slate-700/60 border border-slate-600 flex-shrink-0 group-hover:border-[#7C3AED]/70 transition-colors" />
+              {showThumbnail ? (
+                <img
+                  src={thumbnailUrl!}
+                  alt={video.title ? `${video.title} thumbnail` : "Video thumbnail"}
+                  className="h-20 w-36 rounded-lg border border-slate-600 object-cover flex-shrink-0 bg-slate-700/60 group-hover:border-[#7C3AED]/70 transition-colors"
+                  onError={() => {
+                    if (!thumbnailUrl) return;
+                    setFailedThumbnailUrls((previous) =>
+                      previous[thumbnailUrl] ? previous : { ...previous, [thumbnailUrl]: true }
+                    );
+                  }}
+                />
+              ) : (
+                <div className="h-20 w-36 rounded-lg bg-slate-700/60 border border-slate-600 flex-shrink-0 group-hover:border-[#7C3AED]/70 transition-colors" />
+              )}
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <h3 className="truncate text-base font-semibold text-white group-hover:text-[#A78BFA] transition-colors">
@@ -210,7 +229,8 @@ export function VideoList({ videos, loading, error, onRefresh, onOpenUpload }: V
             </div>
           </div>
         </Card>
-      ))}
+      );
+      })}
     </div>
   );
 }

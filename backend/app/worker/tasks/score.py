@@ -64,6 +64,24 @@ def _build_clip_title(text: str, clip_number: int) -> str:
     return f"{trimmed[:69].rstrip()}..."
 
 
+def _thumbnail_timestamps(start_time: float, end_time: float) -> list[float]:
+    safe_start = max(float(start_time), 0.0)
+    safe_end = max(float(end_time), safe_start)
+    duration = max(safe_end - safe_start, 0.0)
+    midpoint = safe_start + (duration / 2.0)
+    end_probe = max(safe_start, safe_end - 0.15)
+    start_probe = safe_start + 0.15 if duration >= 0.3 else safe_start
+
+    candidates = [midpoint, start_probe, end_probe, safe_start, 0.0]
+    deduped: list[float] = []
+    for ts in candidates:
+        normalized = round(max(ts, 0.0), 3)
+        if normalized in deduped:
+            continue
+        deduped.append(normalized)
+    return deduped
+
+
 def _build_scored_candidates(
     transcript_words: list[TranscriptSegment],
     exclude_zones: list[ExcludeZone],
@@ -262,23 +280,38 @@ def score_job(self, video_id: str):
             thumbnail_success = 0
             thumbnail_failed = 0
             for clip in created_clips:
-                midpoint = clip.start_time + ((clip.end_time - clip.start_time) / 2.0)
                 thumb_local_path = tmp_dir / f"thumb-{clip.id}.jpg"
                 thumb_storage_key = clip_thumbnail_key(str(video.user_id), str(video.id), str(clip.id))
+                timestamps = _thumbnail_timestamps(clip.start_time, clip.end_time)
+                thumb_error: Exception | None = None
 
-                try:
-                    extract_thumbnail(str(local_video_path), str(thumb_local_path), midpoint)
-                    r2_client.upload_file(str(thumb_local_path), thumb_storage_key)
-                    clip.thumbnail_key = thumb_storage_key
-                    thumbnail_success += 1
-                except Exception as thumb_exc:
+                for timestamp in timestamps:
+                    try:
+                        extract_thumbnail(str(local_video_path), str(thumb_local_path), timestamp)
+                        r2_client.upload_file(str(thumb_local_path), thumb_storage_key)
+                        clip.thumbnail_key = thumb_storage_key
+                        thumbnail_success += 1
+                        thumb_error = None
+                        break
+                    except Exception as thumb_exc:
+                        thumb_error = thumb_exc
+                        logger.warning(
+                            "[score] thumbnail attempt failed video_id=%s clip_id=%s ts=%s error=%s",
+                            video_id,
+                            clip.id,
+                            timestamp,
+                            thumb_exc,
+                        )
+
+                if thumb_error is not None:
                     clip.thumbnail_key = None
                     thumbnail_failed += 1
                     logger.warning(
-                        "[score] thumbnail generation failed video_id=%s clip_id=%s error=%s",
+                        "[score] thumbnail generation failed video_id=%s clip_id=%s attempts=%s final_error=%s",
                         video_id,
                         clip.id,
-                        thumb_exc,
+                        len(timestamps),
+                        thumb_error,
                     )
 
             video.clip_count = len(created_clips)
