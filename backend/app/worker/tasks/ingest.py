@@ -67,6 +67,8 @@ def _map_download_error(error_msg: str) -> str:
         return "This video is age-restricted and cannot be imported in this flow."
     if any(marker in error_lower for marker in ["not available in your country", "geo-restricted", "geoblocked"]):
         return "This video is geo-restricted and cannot be imported from the server region."
+    if "requested format is not available" in error_lower:
+        return "YouTube did not return downloadable video formats from this server. Please try another video or retry later."
     return f"Could not download video: {error_msg[:200]}"
 
 
