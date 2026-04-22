@@ -61,6 +61,48 @@ Google Cloud OAuth redirect URI must match:
 
 If any required field is missing/invalid, `/api/social/providers` returns YouTube as `provider_not_configured` with missing-field diagnostics.
 
+## YouTube Import (Single + Playlist + Fallback)
+
+Server-side YouTube import supports:
+
+- Single links (`watch`, `youtu.be`, `shorts`)
+- Playlist links (`list=...`)
+
+Import behavior is honest by design:
+
+- Public/easy videos use server download (`yt-dlp`)
+- Blocked videos can still be kept as embed metadata
+- Users can upload replacement media manually when server download is blocked
+- Blocked single-video rows also support a one-time local-helper session (`Use Local Helper`) that runs `yt-dlp` on the user machine and uploads back to the same row
+
+Local helper notes:
+
+- Requires local `yt-dlp` and `curl`
+- Helper sessions are one-time and short-lived (default 15 minutes)
+- UI now provides a `Download helper launcher` flow first (no token copy/paste required)
+- CLI copy/paste remains available as a fallback
+- See `docs/local-import-helper.md` for full usage
+
+YouTube import env settings:
+
+- `YOUTUBE_IMPORT_MAX_PLAYLIST_ITEMS` (default `50`)
+- `YOUTUBE_IMPORT_CONCURRENCY` (default `3`)
+- `YTDLP_TIMEOUT_SECONDS` (default `60`)
+- `ENABLE_YOUTUBE_API_METADATA` (default `false`)
+- `YOUTUBE_API_KEY` (optional metadata enrichment only)
+- `YOUTUBE_LOCAL_HELPER_TTL_MINUTES` (default `15`)
+- `YOUTUBE_IMPORT_ADMISSION_MODE` (`off|warn|enforce`, default `warn`)
+- `YOUTUBE_IMPORT_MIN_FREE_DISK_GB` (default `20`)
+- `YOUTUBE_IMPORT_MAX_INGEST_QUEUE_DEPTH` (default `100`)
+- `YOUTUBE_IMPORT_MAX_ACTIVE_PER_USER` (default `3`)
+- `YOUTUBE_IMPORT_MAX_ACTIVE_GLOBAL` (default `12`)
+- `YOUTUBE_IMPORT_RATE_LIMIT_PER_HOUR` (default `25`)
+- `YOUTUBE_HELPER_SESSION_RATE_LIMIT_PER_HOUR` (default `20`)
+- `WORKSPACE_CLEANUP_ENABLED` (default `true`)
+- `WORKSPACE_CLEANUP_DRY_RUN` (default `true`; set `false` to enable deletion)
+- `WORKSPACE_CLEANUP_RETENTION_HOURS` (default `24`)
+- `WORKSPACE_CLEANUP_ORPHAN_GRACE_MINUTES` (default `45`)
+
 ## Facebook Pages Provider Config
 
 To enable real Facebook Pages connection + publishing:

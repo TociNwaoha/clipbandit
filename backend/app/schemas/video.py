@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from pydantic import BaseModel
-from app.models.video import VideoStatus, VideoSourceType
+from app.models.video import VideoImportMode, VideoImportState, VideoSourceType, VideoStatus
 
 
 class VideoResponse(BaseModel):
@@ -10,6 +10,20 @@ class VideoResponse(BaseModel):
     title: str | None
     source_type: VideoSourceType
     source_url: str | None
+    source_video_id: str | None
+    source_playlist_id: str | None
+    source_playlist_title: str | None
+    playlist_index: int | None
+    import_parent_id: uuid.UUID | None
+    embed_url: str | None
+    thumbnail_url: str | None
+    import_state: VideoImportState
+    import_state_ui: str | None = None
+    import_mode: VideoImportMode
+    is_download_blocked: bool
+    error_code: str | None
+    debug_error_message: str | None
+    external_metadata_json: dict
     storage_key: str | None
     source_download_url: str | None = None
     duration_sec: int | None
@@ -58,8 +72,10 @@ class VideoImportYoutubeRequest(BaseModel):
 
 
 class VideoImportYoutubeResponse(BaseModel):
-    video_id: uuid.UUID
-    status: VideoStatus
+    video_id: uuid.UUID | None = None
+    playlist_import_id: uuid.UUID | None = None
+    import_kind: str
+    status: VideoStatus | str
     message: str
 
 
@@ -71,12 +87,27 @@ class VideoListItem(BaseModel):
     clip_count: int
     created_at: datetime
     thumbnail_url: str | None
+    source_type: VideoSourceType
+    source_url: str | None
+    source_video_id: str | None
+    source_playlist_id: str | None
+    source_playlist_title: str | None
+    playlist_index: int | None
+    import_parent_id: uuid.UUID | None
+    embed_url: str | None
+    import_state: VideoImportState
+    import_state_ui: str | None = None
+    import_mode: VideoImportMode
+    is_download_blocked: bool
+    error_code: str | None
     error_message: str | None
 
 
 class VideoStatusResponse(BaseModel):
     video_id: uuid.UUID
     status: VideoStatus
+    import_state: VideoImportState | None = None
+    import_state_ui: str | None = None
     title: str | None
     clip_count: int
     error_message: str | None

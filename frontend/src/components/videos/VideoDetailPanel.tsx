@@ -23,7 +23,23 @@ const statusStyles: Record<string, string> = {
   scoring: "bg-purple-500/20 text-purple-300 animate-pulse",
   ready: "bg-emerald-500/20 text-emerald-300",
   error: "bg-red-500/20 text-red-300",
+  metadata_extracting: "bg-blue-500/20 text-blue-300 animate-pulse",
+  downloadable: "bg-blue-500/20 text-blue-300 animate-pulse",
+  blocked: "bg-amber-500/20 text-amber-300",
+  replacement_upload_required: "bg-amber-500/20 text-amber-300",
+  helper_required: "bg-amber-500/20 text-amber-300",
+  embed_only: "bg-slate-600/50 text-slate-200",
+  failed_retryable: "bg-red-500/20 text-red-300",
+  failed_terminal: "bg-red-500/20 text-red-300",
 };
+
+const YOUTUBE_SOURCE_TYPES = new Set(["youtube", "youtube_single", "youtube_playlist"]);
+const BLOCKED_IMPORT_STATES = new Set([
+  "blocked",
+  "replacement_upload_required",
+  "helper_required",
+  "embed_only",
+]);
 
 function formatDuration(seconds: number | null): string {
   if (!seconds || seconds <= 0) return "Unknown";
@@ -49,6 +65,15 @@ function formatClipDuration(seconds: number | null): string {
   return `${mins}m ${secs}s`;
 }
 
+function importStateLabel(state: string): string {
+  return state
+    .split(":")[0]
+    .split("_")
+    .filter(Boolean)
+    .map((chunk) => chunk.charAt(0).toUpperCase() + chunk.slice(1))
+    .join(" ");
+}
+
 export function VideoDetailPanel({ video, transcript, transcriptError, clips, clipsError }: VideoDetailPanelProps) {
   const [activeTab, setActiveTab] = useState<TabKey>("transcript");
 
@@ -56,14 +81,27 @@ export function VideoDetailPanel({ video, transcript, transcriptError, clips, cl
     if (!transcript) return "";
     return transcript.full_text || "";
   }, [transcript]);
+  const isYoutubeSource = YOUTUBE_SOURCE_TYPES.has(video.source_type);
+  const effectiveImportState = isYoutubeSource ? video.import_state : null;
+  const displayStateKey =
+    isYoutubeSource && effectiveImportState && effectiveImportState !== "processing"
+      ? effectiveImportState
+      : video.status;
+  const displayStateLabel =
+    isYoutubeSource && effectiveImportState && effectiveImportState !== "processing"
+      ? importStateLabel(effectiveImportState)
+      : video.status.charAt(0).toUpperCase() + video.status.slice(1);
+  const isBlockedImport =
+    Boolean(video.is_download_blocked) ||
+    Boolean(effectiveImportState && BLOCKED_IMPORT_STATES.has(effectiveImportState));
 
   return (
     <div className="space-y-6">
       <Card>
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="text-xl font-semibold text-white">{video.title || "Untitled Video"}</h2>
-          <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusStyles[video.status] || statusStyles.queued}`}>
-            {video.status.charAt(0).toUpperCase() + video.status.slice(1)}
+          <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusStyles[displayStateKey] || statusStyles.queued}`}>
+            {displayStateLabel}
           </span>
         </div>
         <div className="mt-4 flex flex-wrap gap-6 text-sm text-slate-300">
@@ -73,8 +111,49 @@ export function VideoDetailPanel({ video, transcript, transcriptError, clips, cl
           <p>
             <span className="text-slate-500">Resolution:</span> {video.resolution || "Unknown"}
           </p>
+          {video.source_type.startsWith("youtube") ? (
+            <p>
+              <span className="text-slate-500">Import mode:</span>{" "}
+              {video.import_mode === "embed_only"
+                ? "Embed only"
+                : video.import_mode === "manual_upload"
+                ? "Manual upload"
+                : "Server download"}
+            </p>
+          ) : null}
         </div>
+        {isBlockedImport ? (
+          <p className="mt-3 text-xs text-amber-300">
+            Server download was blocked for this source. You can keep it as embed reference or upload file manually.
+          </p>
+        ) : null}
       </Card>
+
+      {video.source_download_url ? (
+        <Card>
+          <video
+            className="w-full rounded-lg border border-slate-800 bg-black"
+            controls
+            playsInline
+            preload="metadata"
+            src={video.source_download_url}
+          >
+            Your browser does not support the video tag.
+          </video>
+        </Card>
+      ) : video.embed_url ? (
+        <Card>
+          <div className="aspect-video w-full overflow-hidden rounded-lg border border-slate-800 bg-black">
+            <iframe
+              src={video.embed_url}
+              title={video.title || "YouTube embed"}
+              className="h-full w-full"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+            />
+          </div>
+        </Card>
+      ) : null}
 
       <Card>
         <div className="mb-4 inline-flex rounded-lg bg-slate-900 p-1">

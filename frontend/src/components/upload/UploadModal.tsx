@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/Button";
+import { YouTubeImportResponse } from "@/types";
 
 type UploadTab = "upload" | "youtube";
 
@@ -193,8 +194,12 @@ export function UploadModal({ isOpen, onClose, onUploaded }: UploadModalProps) {
     setError(null);
     setSuccessMessage(null);
     try {
-      await api.post("/api/videos/import-youtube", { url: normalized });
-      setSuccessMessage("Import started! We'll process your video shortly.");
+      const payload = await api.post<YouTubeImportResponse>("/api/videos/import-youtube", { url: normalized });
+      if (payload.import_kind === "playlist") {
+        setSuccessMessage("Importing playlist. Items will appear progressively.");
+      } else {
+        setSuccessMessage("Import started! We'll process your video shortly.");
+      }
       await onUploaded();
       window.setTimeout(() => {
         closeModal();
@@ -336,17 +341,20 @@ export function UploadModal({ isOpen, onClose, onUploaded }: UploadModalProps) {
             </div>
           ) : (
             <div>
-              <label className="mb-2 block text-sm text-slate-300">YouTube URL</label>
+              <label className="mb-2 block text-sm text-slate-300">YouTube video or playlist URL</label>
               <input
                 type="text"
                 value={youtubeUrl}
                 onChange={(event) => setYoutubeUrl(event.target.value)}
-                placeholder="Paste YouTube URL..."
+                placeholder="Paste watch, youtu.be, shorts, or playlist URL..."
                 disabled={importing}
                 className="w-full rounded-lg border border-slate-700 bg-[#1E293B]/70 px-4 py-3 text-sm text-white
                            placeholder:text-slate-500 focus:border-[#7C3AED] focus:outline-none"
               />
               {!youtubeValid && <p className="mt-2 text-xs text-red-400">Only youtube.com or youtu.be links are allowed</p>}
+              <p className="mt-2 text-xs text-slate-400">
+                Some videos may be blocked on server runtime. In those cases, you can keep embed metadata or upload manually.
+              </p>
               <div className="mt-5 flex justify-end">
                 <Button onClick={importYoutube} disabled={!youtubeUrl.trim()} loading={importing} className="min-w-28">
                   Import

@@ -4,12 +4,19 @@ import { useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { ConnectionsSummary } from "@/components/connections/ConnectionsSummary";
 import { UploadModal } from "@/components/upload/UploadModal";
+import { PlaylistImportCard } from "@/components/videos/PlaylistImportCard";
 import { VideoList } from "@/components/videos/VideoList";
 import { useVideos } from "@/hooks/useVideos";
+import { useYoutubeImports } from "@/hooks/useYoutubeImports";
 
 export function VideosDashboard() {
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const { videos, loading, error, refresh } = useVideos();
+  const { imports, refresh: refreshImports } = useYoutubeImports();
+
+  const refreshAll = async () => {
+    await Promise.all([refresh(), refreshImports()]);
+  };
 
   return (
     <>
@@ -24,14 +31,23 @@ export function VideosDashboard() {
         videos={videos}
         loading={loading}
         error={error}
-        onRefresh={refresh}
+        onRefresh={refreshAll}
         onOpenUpload={() => setIsUploadOpen(true)}
       />
+
+      {imports.length > 0 ? (
+        <div className="mt-6 space-y-3">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Playlist Imports</h3>
+          {imports.map((playlist) => (
+            <PlaylistImportCard key={playlist.id} playlist={playlist} />
+          ))}
+        </div>
+      ) : null}
 
       <UploadModal
         isOpen={isUploadOpen}
         onClose={() => setIsUploadOpen(false)}
-        onUploaded={refresh}
+        onUploaded={refreshAll}
       />
     </>
   );

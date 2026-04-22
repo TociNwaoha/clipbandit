@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
+import { BlockedImportActions } from "@/components/videos/BlockedImportActions";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
@@ -24,7 +25,23 @@ const statusStyles: Record<string, string> = {
   scoring: "bg-purple-500/20 text-purple-300 animate-pulse",
   ready: "bg-emerald-500/20 text-emerald-300",
   error: "bg-red-500/20 text-red-300",
+  metadata_extracting: "bg-blue-500/20 text-blue-300 animate-pulse",
+  downloadable: "bg-blue-500/20 text-blue-300 animate-pulse",
+  blocked: "bg-amber-500/20 text-amber-300",
+  replacement_upload_required: "bg-amber-500/20 text-amber-300",
+  helper_required: "bg-amber-500/20 text-amber-300",
+  embed_only: "bg-slate-600/50 text-slate-200",
+  failed_retryable: "bg-red-500/20 text-red-300",
+  failed_terminal: "bg-red-500/20 text-red-300",
 };
+
+const YOUTUBE_SOURCE_TYPES = new Set(["youtube", "youtube_single", "youtube_playlist"]);
+const BLOCKED_IMPORT_STATES = new Set([
+  "blocked",
+  "replacement_upload_required",
+  "helper_required",
+  "embed_only",
+]);
 
 function formatDuration(seconds: number | null): string | null {
   if (!seconds || seconds <= 0) return null;
@@ -59,6 +76,35 @@ function formatRelativeTime(isoDate: string): string {
 
 function statusLabel(status: string): string {
   return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+function importStateLabel(state: string): string {
+  return state
+    .split(":")[0]
+    .split("_")
+    .filter(Boolean)
+    .map((chunk) => chunk.charAt(0).toUpperCase() + chunk.slice(1))
+    .join(" ");
+}
+
+function displayStateKey(video: VideoListItem): string {
+  if (!YOUTUBE_SOURCE_TYPES.has(video.source_type) || !video.import_state) {
+    return video.status;
+  }
+  if (video.import_state === "processing") {
+    return video.status;
+  }
+  return video.import_state;
+}
+
+function displayStateLabel(video: VideoListItem): string {
+  if (!YOUTUBE_SOURCE_TYPES.has(video.source_type) || !video.import_state) {
+    return statusLabel(video.status);
+  }
+  if (video.import_state === "processing") {
+    return statusLabel(video.status);
+  }
+  return importStateLabel(video.import_state);
 }
 
 export function VideoList({ videos, loading, error, onRefresh, onOpenUpload }: VideoListProps) {
@@ -154,6 +200,15 @@ export function VideoList({ videos, loading, error, onRefresh, onOpenUpload }: V
       {sortedVideos.map((video) => {
         const thumbnailUrl = video.thumbnail_url;
         const showThumbnail = Boolean(thumbnailUrl && !failedThumbnailUrls[thumbnailUrl]);
+        const stateKey = displayStateKey(video);
+        const stateLabel = displayStateLabel(video);
+        const showBlockedActions =
+          Boolean(video.is_download_blocked) || Boolean(video.import_state && BLOCKED_IMPORT_STATES.has(video.import_state));
+        const showErrorText =
+          (video.status === "error" ||
+            video.import_state === "failed_retryable" ||
+            video.import_state === "failed_terminal") &&
+          Boolean(video.error_message);
 
         return (
         <Card key={video.id} className="relative">
@@ -179,16 +234,32 @@ export function VideoList({ videos, loading, error, onRefresh, onOpenUpload }: V
                   <h3 className="truncate text-base font-semibold text-white group-hover:text-[#A78BFA] transition-colors">
                     {video.title || "Untitled video"}
                   </h3>
-                  <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusStyles[video.status] || statusStyles.queued}`}>
-                    {statusLabel(video.status)}
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusStyles[stateKey] || statusStyles.queued}`}>
+                    {stateLabel}
                   </span>
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-slate-400">
                   {formatDuration(video.duration_sec) && <span>{formatDuration(video.duration_sec)}</span>}
                   {video.clip_count > 0 && <span>{video.clip_count} clips</span>}
                   <span>{formatRelativeTime(video.created_at)}</span>
+                  {video.source_type === "youtube_playlist" && video.playlist_index !== null ? (
+                    <span>Playlist item #{(video.playlist_index || 0) + 1}</span>
+                  ) : null}
                 </div>
-                {video.status === "error" && video.error_message ? (
+                {showBlockedActions ? (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <span className="rounded bg-amber-500/20 px-2 py-0.5 text-[11px] text-amber-300">
+                      Blocked on server
+                    </span>
+                    <span className="rounded bg-blue-500/20 px-2 py-0.5 text-[11px] text-blue-300">
+                      Can still embed
+                    </span>
+                    <span className="rounded bg-slate-700 px-2 py-0.5 text-[11px] text-slate-200">
+                      Upload file manually
+                    </span>
+                  </div>
+                ) : null}
+                {showErrorText ? (
                   <p className="mt-2 text-xs text-red-300">{video.error_message}</p>
                 ) : null}
               </div>
@@ -231,6 +302,9 @@ export function VideoList({ videos, loading, error, onRefresh, onOpenUpload }: V
               </div>
             </div>
           </div>
+          {showBlockedActions ? (
+            <BlockedImportActions video={video} onActionDone={onRefresh} />
+          ) : null}
         </Card>
       );
       })}

@@ -13,10 +13,12 @@ from app.models.clip import Clip, ClipStatus
 from app.models.exclude_zone import ExcludeZone
 from app.models.job import Job, JobStatus
 from app.models.transcript import TranscriptSegment
-from app.models.video import Video, VideoStatus
+from app.models.video import Video, VideoImportState, VideoSourceType, VideoStatus
 from app.services.ffmpeg import extract_audio, extract_thumbnail
 from app.services.ai_copy import AICopyUnavailableError, generate_clip_copy, provider_configured
 from app.services.r2 import r2_client
+from app.services.workspace import finalize_workspace, heartbeat_workspace, start_workspace
+from app.services.youtube import transition_import_state
 from app.services.scoring import (
     CandidateWindow,
     apply_exclude_zones,
@@ -159,6 +161,7 @@ def score_job(self, video_id: str):
     logger.info("[score] score_job received for video_id=%s", video_id)
     video_uuid: uuid.UUID | None = None
     storage_key: str | None = None
+    workspace = None
 
     try:
         try:
@@ -170,9 +173,31 @@ def score_job(self, video_id: str):
             video = db.execute(select(Video).where(Video.id == video_uuid)).scalars().first()
             if not video:
                 raise ValueError(f"Video not found: {video_id}")
+            workspace = start_workspace(
+                job_type="score",
+                workspace_key=f"{video_id}-score-{self.request.id or uuid.uuid4().hex[:8]}",
+                video_id=str(video.id),
+                user_id=str(video.user_id),
+                expected_paths=["source_video", "audio_analysis", "clip_thumbnails"],
+                refs={"video_id": str(video.id)},
+            )
             if not video.storage_key:
                 raise FileNotFoundError(f"Video storage key missing for {video_id}")
             storage_key = video.storage_key
+            if video.source_type in {
+                VideoSourceType.youtube,
+                VideoSourceType.youtube_single,
+                VideoSourceType.youtube_playlist,
+            }:
+                transition_import_state(
+                    db,
+                    video,
+                    to_state=VideoImportState.processing,
+                    reason_code="score_started",
+                    actor="worker_score",
+                    allow_noop=True,
+                    strict=False,
+                )
 
             score_row = _latest_score_job(db, video_uuid)
             if not score_row:
@@ -199,10 +224,14 @@ def score_job(self, video_id: str):
 
         logger.info("[score] loading media source for video_id=%s", video_id)
         r2_client.download_file(storage_key, str(local_video_path))
+        if workspace:
+            heartbeat_workspace(workspace)
         logger.info("[score] media source ready at %s", local_video_path)
 
         logger.info("[score] audio analysis start for video_id=%s", video_id)
         extract_audio(str(local_video_path), str(local_audio_path))
+        if workspace:
+            heartbeat_workspace(workspace)
         logger.info("[score] audio analysis end for video_id=%s", video_id)
 
         with SyncSessionLocal() as db:
@@ -317,6 +346,21 @@ def score_job(self, video_id: str):
             video.clip_count = len(created_clips)
             video.status = VideoStatus.ready
             video.error_message = None
+            if video.source_type in {
+                VideoSourceType.youtube,
+                VideoSourceType.youtube_single,
+                VideoSourceType.youtube_playlist,
+            }:
+                transition_import_state(
+                    db,
+                    video,
+                    to_state=VideoImportState.ready,
+                    reason_code="score_complete",
+                    actor="worker_score",
+                    metadata={"clip_count": len(created_clips)},
+                    allow_noop=True,
+                    strict=False,
+                )
 
             score_row = _latest_score_job(db, video_uuid)
             if score_row:
@@ -411,6 +455,8 @@ def score_job(self, video_id: str):
         if not selected_candidates:
             logger.info("[score] no strong clips found video_id=%s status=ready clip_count=0", video_id)
         logger.info("[score] final status update video_id=%s status=ready", video_id)
+        if workspace:
+            finalize_workspace(workspace, state="terminal_success", metadata={"result": "ready"})
         return {
             "video_id": video_id,
             "status": "ready",
@@ -426,6 +472,21 @@ def score_job(self, video_id: str):
                     if video:
                         video.status = VideoStatus.error
                         video.error_message = str(exc)[:500]
+                        if video.source_type in {
+                            VideoSourceType.youtube,
+                            VideoSourceType.youtube_single,
+                            VideoSourceType.youtube_playlist,
+                        }:
+                            transition_import_state(
+                                db,
+                                video,
+                                to_state=VideoImportState.failed_retryable,
+                                reason_code="score_error",
+                                actor="worker_score",
+                                metadata={"error_type": type(exc).__name__},
+                                allow_noop=True,
+                                strict=False,
+                            )
 
                     score_row = _latest_score_job(db, video_uuid)
                     if score_row:
@@ -435,6 +496,12 @@ def score_job(self, video_id: str):
                     db.commit()
             except Exception as inner_exc:
                 logger.exception("[score] failed to write error state for video_id=%s: %s", video_id, inner_exc)
+        if workspace:
+            finalize_workspace(
+                workspace,
+                state="terminal_failed",
+                metadata={"error_type": type(exc).__name__},
+            )
         raise
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
