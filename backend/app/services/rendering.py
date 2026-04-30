@@ -427,42 +427,81 @@ def _format_ass_timestamp(seconds: float) -> str:
 
 def _ass_style_line(caption_style: str | None, layout: CaptionLayout) -> str:
     style = caption_style or "clean_minimal"
-    if style == "bold_boxed":
-        primary = "&H00FFFFFF"
-        secondary = "&H000000FF"
-        outline_colour = "&H00141414"
-        back_colour = "&H96000000"
-        bold = -1
-        italic = 0
-        border_style = 3
-        outline = 1.0
-        shadow = 0
-    elif style == "sermon_quote":
-        primary = "&H00F5F5F5"
-        secondary = "&H000000FF"
-        outline_colour = "&H00202020"
-        back_colour = "&H5A000000"
-        bold = 0
-        italic = 1
-        border_style = 1
-        outline = 2.2
-        shadow = 0
-    else:
-        primary = "&H00FFFFFF"
-        secondary = "&H000000FF"
-        outline_colour = "&H00141414"
-        back_colour = "&H46000000"
-        bold = 0
-        italic = 0
-        border_style = 1
-        outline = 1.8
-        shadow = 0
+    style_presets: dict[str, dict[str, str | int | float]] = {
+        "bold_boxed": {
+            "primary": "&H00FFFFFF",
+            "secondary": "&H000000FF",
+            "outline_colour": "&H00141414",
+            "back_colour": "&H96000000",
+            "bold": -1,
+            "italic": 0,
+            "border_style": 3,
+            "outline": 1.0,
+            "shadow": 0,
+        },
+        "sermon_quote": {
+            "primary": "&H00F5F5F5",
+            "secondary": "&H000000FF",
+            "outline_colour": "&H00202020",
+            "back_colour": "&H5A000000",
+            "bold": 0,
+            "italic": 1,
+            "border_style": 1,
+            "outline": 2.2,
+            "shadow": 0,
+        },
+        "clean_minimal": {
+            "primary": "&H00FFFFFF",
+            "secondary": "&H000000FF",
+            "outline_colour": "&H00141414",
+            "back_colour": "&H46000000",
+            "bold": 0,
+            "italic": 0,
+            "border_style": 1,
+            "outline": 1.8,
+            "shadow": 0,
+        },
+        "kinetic_bold": {
+            "primary": "&H00FFFFFF",
+            "secondary": "&H000000FF",
+            "outline_colour": "&H000E0E0E",
+            "back_colour": "&HAA000000",
+            "bold": -1,
+            "italic": 0,
+            "border_style": 3,
+            "outline": 0.8,
+            "shadow": 0,
+        },
+        "cinema_outline": {
+            "primary": "&H00FFFFFF",
+            "secondary": "&H000000FF",
+            "outline_colour": "&H000A0A0A",
+            "back_colour": "&H22000000",
+            "bold": -1,
+            "italic": 0,
+            "border_style": 1,
+            "outline": 3.0,
+            "shadow": 1,
+        },
+        "clean_highlight": {
+            "primary": "&H00FFFFFF",
+            "secondary": "&H000000FF",
+            "outline_colour": "&H00141414",
+            "back_colour": "&H76000000",
+            "bold": 0,
+            "italic": 0,
+            "border_style": 3,
+            "outline": 0.6,
+            "shadow": 0,
+        },
+    }
+    preset = style_presets.get(style, style_presets["clean_minimal"])
 
     return (
         "Style: Default,Arial,"
         f"{layout.font_size},"
-        f"{primary},{secondary},{outline_colour},{back_colour},"
-        f"{bold},{italic},0,0,100,100,0,0,{border_style},{outline:.1f},{shadow},"
+        f"{preset['primary']},{preset['secondary']},{preset['outline_colour']},{preset['back_colour']},"
+        f"{preset['bold']},{preset['italic']},0,0,100,100,0,0,{preset['border_style']},{float(preset['outline']):.1f},{preset['shadow']},"
         f"2,{layout.margin_l},{layout.margin_r},{layout.margin_v},1"
     )
 
@@ -501,12 +540,15 @@ def _caption_layout(
         max_chars = 34
 
     style = caption_style or "clean_minimal"
-    if style == "bold_boxed":
-        font_size = int(round(base_font * 1.02))
-    elif style == "sermon_quote":
-        font_size = int(round(base_font * 0.96))
-    else:
-        font_size = int(round(base_font * 0.92))
+    style_font_scale = {
+        "bold_boxed": 1.02,
+        "sermon_quote": 0.96,
+        "clean_minimal": 0.92,
+        "kinetic_bold": 1.08,
+        "cinema_outline": 1.00,
+        "clean_highlight": 0.96,
+    }
+    font_size = int(round(base_font * style_font_scale.get(style, 0.92)))
 
     if caption_scale is None:
         scale = 1.0

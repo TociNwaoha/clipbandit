@@ -10,6 +10,7 @@ export interface User {
 }
 
 export type VideoSourceType = "upload" | "youtube" | "youtube_single" | "youtube_playlist";
+export type ClipProfile = "viral" | "sermon";
 export type VideoStatus =
   | "queued"
   | "downloading"
@@ -39,6 +40,7 @@ export interface Video {
   title: string | null;
   source_type: VideoSourceType;
   source_url: string | null;
+  clip_profile?: ClipProfile;
   source_video_id?: string | null;
   source_playlist_id?: string | null;
   source_playlist_title?: string | null;
@@ -75,6 +77,7 @@ export interface VideoListItem {
   thumbnail_url: string | null;
   source_type: VideoSourceType;
   source_url: string | null;
+  clip_profile?: ClipProfile;
   source_video_id: string | null;
   source_playlist_id: string | null;
   source_playlist_title: string | null;
@@ -95,6 +98,9 @@ export interface YouTubeImportResponse {
   import_kind: "single" | "playlist";
   status: string;
   message: string;
+  recovery_required?: boolean;
+  recovery_reason?: string | null;
+  recovery_action?: string | null;
 }
 
 export interface PlaylistImportItem {
@@ -176,7 +182,13 @@ export interface Clip {
 }
 
 export type AspectRatio = "original" | "9:16" | "16:9" | "1:1";
-export type CaptionStyle = "bold_boxed" | "sermon_quote" | "clean_minimal";
+export type CaptionStyle =
+  | "bold_boxed"
+  | "sermon_quote"
+  | "clean_minimal"
+  | "kinetic_bold"
+  | "cinema_outline"
+  | "clean_highlight";
 export type CaptionFormat = "burned_in" | "srt";
 export type ExportStatus = "queued" | "rendering" | "ready" | "error";
 

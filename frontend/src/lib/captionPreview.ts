@@ -9,37 +9,126 @@ export interface CaptionPreviewLayout {
   maxLines: number;
 }
 
-interface CaptionStyleTheme {
+export interface CaptionStyleTheme {
   bold: boolean;
   italic: boolean;
   boxed: boolean;
   outlinePx: number;
   backgroundOpacity: number;
+  fontFamily: string;
 }
 
-const STYLE_THEMES: Record<CaptionStyle, CaptionStyleTheme> = {
-  bold_boxed: {
-    bold: true,
-    italic: false,
-    boxed: true,
-    outlinePx: 1,
-    backgroundOpacity: 0.62,
+export interface CaptionStyleMeta {
+  value: CaptionStyle;
+  label: string;
+  description: string;
+  theme: CaptionStyleTheme;
+  fontSizeOffsetPx: number;
+}
+
+const CAPTION_STYLE_META: CaptionStyleMeta[] = [
+  {
+    value: "bold_boxed",
+    label: "Bold Boxed",
+    description: "High-contrast boxed text for quick readability.",
+    theme: {
+      bold: true,
+      italic: false,
+      boxed: true,
+      outlinePx: 1,
+      backgroundOpacity: 0.62,
+      fontFamily: "Arial, Helvetica, sans-serif",
+    },
+    fontSizeOffsetPx: 3,
   },
-  sermon_quote: {
-    bold: false,
-    italic: true,
-    boxed: false,
-    outlinePx: 2,
-    backgroundOpacity: 0.35,
+  {
+    value: "sermon_quote",
+    label: "Sermon Quote",
+    description: "Italic quote style for reflective speaking clips.",
+    theme: {
+      bold: false,
+      italic: true,
+      boxed: false,
+      outlinePx: 2,
+      backgroundOpacity: 0.35,
+      fontFamily: "Arial, Helvetica, sans-serif",
+    },
+    fontSizeOffsetPx: 1,
   },
-  clean_minimal: {
-    bold: false,
-    italic: false,
-    boxed: false,
-    outlinePx: 1.5,
-    backgroundOpacity: 0.28,
+  {
+    value: "clean_minimal",
+    label: "Clean Minimal",
+    description: "Simple low-noise subtitle style.",
+    theme: {
+      bold: false,
+      italic: false,
+      boxed: false,
+      outlinePx: 1.5,
+      backgroundOpacity: 0.28,
+      fontFamily: "Arial, Helvetica, sans-serif",
+    },
+    fontSizeOffsetPx: 0,
   },
-};
+  {
+    value: "kinetic_bold",
+    label: "Kinetic Bold",
+    description: "Punchy bold blocks with extra emphasis.",
+    theme: {
+      bold: true,
+      italic: false,
+      boxed: true,
+      outlinePx: 0.8,
+      backgroundOpacity: 0.72,
+      fontFamily: "Arial, Helvetica, sans-serif",
+    },
+    fontSizeOffsetPx: 5,
+  },
+  {
+    value: "cinema_outline",
+    label: "Cinema Outline",
+    description: "Cinematic outlined text with minimal backdrop.",
+    theme: {
+      bold: true,
+      italic: false,
+      boxed: false,
+      outlinePx: 3,
+      backgroundOpacity: 0.12,
+      fontFamily: "Arial, Helvetica, sans-serif",
+    },
+    fontSizeOffsetPx: 2,
+  },
+  {
+    value: "clean_highlight",
+    label: "Clean Highlight",
+    description: "Clean style with a subtle highlight bar.",
+    theme: {
+      bold: false,
+      italic: false,
+      boxed: true,
+      outlinePx: 0.6,
+      backgroundOpacity: 0.45,
+      fontFamily: "Arial, Helvetica, sans-serif",
+    },
+    fontSizeOffsetPx: 1,
+  },
+];
+
+const STYLE_META_BY_VALUE: Record<CaptionStyle, CaptionStyleMeta> = Object.fromEntries(
+  CAPTION_STYLE_META.map((item) => [item.value, item])
+) as Record<CaptionStyle, CaptionStyleMeta>;
+
+export function getCaptionStyleOptions(): CaptionStyleMeta[] {
+  return CAPTION_STYLE_META;
+}
+
+export function getCaptionStyleMeta(captionStyle: CaptionStyle): CaptionStyleMeta {
+  return STYLE_META_BY_VALUE[captionStyle] || STYLE_META_BY_VALUE.clean_minimal;
+}
+
+export function formatCaptionStyleLabel(captionStyle: CaptionStyle | null | undefined): string {
+  if (!captionStyle) return "No style";
+  return getCaptionStyleMeta(captionStyle).label;
+}
 
 export function getCaptionPreviewLayout(
   captionStyle: CaptionStyle,
@@ -55,14 +144,11 @@ export function getCaptionPreviewLayout(
           : "1:1"
       : aspectRatio;
 
+  const styleMeta = getCaptionStyleMeta(captionStyle);
+
   if (effectiveAspect === "9:16") {
     return {
-      fontSizePx:
-        captionStyle === "bold_boxed"
-          ? 26
-          : captionStyle === "sermon_quote"
-            ? 24
-            : 23,
+      fontSizePx: 23 + styleMeta.fontSizeOffsetPx,
       lineHeight: 1.22,
       marginXPercent: 12,
       marginBottomPercent: 15,
@@ -73,12 +159,7 @@ export function getCaptionPreviewLayout(
 
   if (effectiveAspect === "16:9") {
     return {
-      fontSizePx:
-        captionStyle === "bold_boxed"
-          ? 32
-          : captionStyle === "sermon_quote"
-            ? 30
-            : 29,
+      fontSizePx: 29 + styleMeta.fontSizeOffsetPx,
       lineHeight: 1.2,
       marginXPercent: 8,
       marginBottomPercent: 11,
@@ -88,12 +169,7 @@ export function getCaptionPreviewLayout(
   }
 
   return {
-    fontSizePx:
-      captionStyle === "bold_boxed"
-        ? 34
-        : captionStyle === "sermon_quote"
-          ? 32
-          : 31,
+    fontSizePx: 31 + styleMeta.fontSizeOffsetPx,
     lineHeight: 1.22,
     marginXPercent: 10,
     marginBottomPercent: 12,
@@ -103,7 +179,7 @@ export function getCaptionPreviewLayout(
 }
 
 export function getCaptionStyleTheme(captionStyle: CaptionStyle): CaptionStyleTheme {
-  return STYLE_THEMES[captionStyle];
+  return getCaptionStyleMeta(captionStyle).theme;
 }
 
 export function wrapCaptionPreviewText(

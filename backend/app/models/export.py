@@ -20,6 +20,9 @@ class CaptionStyle(str, enum.Enum):
     bold_boxed = "bold_boxed"
     sermon_quote = "sermon_quote"
     clean_minimal = "clean_minimal"
+    kinetic_bold = "kinetic_bold"
+    cinema_outline = "cinema_outline"
+    clean_highlight = "clean_highlight"
 
 
 class CaptionFormat(str, enum.Enum):

@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { api, ApiError } from "@/lib/api";
+import { formatCaptionStyleLabel } from "@/lib/captionPreview";
 import { Export } from "@/types";
 
 const ACTIVE_EXPORT_STATUSES = new Set(["queued", "rendering"]);
@@ -214,7 +215,7 @@ export function ExportsLibrary({ initialExports, initialError = null }: ExportsL
                     </p>
                     <p className="mt-1 text-xs text-slate-400">
                       {item.clip_title || `Clip ${shortId(item.clip_id)}`} • {item.aspect_ratio} •{" "}
-                      {item.caption_style || "no_style"} • {item.caption_format}
+                      {formatCaptionStyleLabel(item.caption_style)} • {item.caption_format}
                     </p>
                     <p className="mt-1 text-xs text-slate-500">
                       Created {formatRelativeTime(item.created_at)}

@@ -9,7 +9,10 @@ import { SocialPublishPanel } from "@/components/videos/SocialPublishPanel";
 import { api, ApiError } from "@/lib/api";
 import {
   buildCaptionPreviewText,
+  formatCaptionStyleLabel,
   getCaptionPreviewLayout,
+  getCaptionStyleMeta,
+  getCaptionStyleOptions,
   getCaptionStyleTheme,
   wrapCaptionPreviewText,
 } from "@/lib/captionPreview";
@@ -270,6 +273,8 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
     [captionStyle, aspectRatio, effectiveSourceAspectRatio]
   );
   const captionPreviewTheme = useMemo(() => getCaptionStyleTheme(captionStyle), [captionStyle]);
+  const captionStyleMeta = useMemo(() => getCaptionStyleMeta(captionStyle), [captionStyle]);
+  const captionStyleOptions = useMemo(() => getCaptionStyleOptions(), []);
   const captionPreviewText = useMemo(
     () => buildCaptionPreviewText(clip.transcript_text),
     [clip.transcript_text]
@@ -344,19 +349,50 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
       }
 
       await new Promise<void>((resolve) => {
-        let resolved = false;
-        const done = () => {
-          if (resolved) return;
-          resolved = true;
-          player.removeEventListener("seeked", done);
+        let settled = false;
+        let frameHandle: number | null = null;
+        const settleTolerance = 0.08;
+        const settleTimeoutMs = 2500;
+
+        const cleanup = () => {
+          if (frameHandle !== null) {
+            window.cancelAnimationFrame(frameHandle);
+          }
+          player.removeEventListener("seeked", onSeeked);
+          window.clearTimeout(timeoutHandle);
+        };
+
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          cleanup();
           resolve();
         };
-        player.addEventListener("seeked", done, { once: true });
+
+        const waitForConvergence = () => {
+          if (Math.abs(player.currentTime - clamped) <= settleTolerance) {
+            finish();
+            return;
+          }
+          frameHandle = window.requestAnimationFrame(waitForConvergence);
+        };
+
+        const onSeeked = () => {
+          waitForConvergence();
+        };
+
+        const timeoutHandle = window.setTimeout(() => {
+          // Safety timeout: avoid hanging replay on edge-case browser seek stalls.
+          finish();
+        }, settleTimeoutMs);
+
+        player.addEventListener("seeked", onSeeked);
         player.currentTime = clamped;
-        window.setTimeout(done, 250);
+        waitForConvergence();
       });
-      setPlayerCurrentTime(clamped);
-      syncFramedPreviewTime(clamped);
+      const settledTime = player.currentTime;
+      setPlayerCurrentTime(settledTime);
+      syncFramedPreviewTime(settledTime);
     },
     [normalizedMediaDuration, syncFramedPreviewTime]
   );
@@ -795,6 +831,7 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
                           lineHeight: captionPreviewLayout.lineHeight,
                           fontWeight: captionPreviewTheme.bold ? 700 : 500,
                           fontStyle: captionPreviewTheme.italic ? "italic" : "normal",
+                          fontFamily: captionPreviewTheme.fontFamily,
                           textShadow:
                             captionPreviewTheme.outlinePx > 0
                               ? `0 0 ${captionPreviewTheme.outlinePx}px rgba(0,0,0,0.9), 0 2px ${
@@ -1064,10 +1101,37 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
               onChange={(event) => setCaptionStyle(event.target.value as CaptionStyle)}
               className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white focus:border-[#7C3AED] focus:outline-none"
             >
-              <option value="bold_boxed">bold_boxed</option>
-              <option value="sermon_quote">sermon_quote</option>
-              <option value="clean_minimal">clean_minimal</option>
+              {captionStyleOptions.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
             </select>
+            <div className="mt-2 rounded-md border border-slate-700 bg-slate-950/60 p-3">
+              <p className="text-[11px] uppercase tracking-wide text-slate-400">Style preview</p>
+              <p className="mt-1 text-xs text-slate-400">{captionStyleMeta.description}</p>
+              <div className="mt-2 rounded-md bg-black/55 px-2 py-2 text-center">
+                <span
+                  className="inline-block text-white"
+                  style={{
+                    fontFamily: captionPreviewTheme.fontFamily,
+                    fontWeight: captionPreviewTheme.bold ? 700 : 500,
+                    fontStyle: captionPreviewTheme.italic ? "italic" : "normal",
+                    textShadow:
+                      captionPreviewTheme.outlinePx > 0
+                        ? `0 0 ${captionPreviewTheme.outlinePx}px rgba(0,0,0,0.9), 0 2px ${
+                            captionPreviewTheme.outlinePx + 1
+                          }px rgba(0,0,0,0.75)`
+                        : "0 1px 2px rgba(0,0,0,0.75)",
+                    padding: captionPreviewTheme.boxed ? "4px 8px" : "0",
+                    borderRadius: captionPreviewTheme.boxed ? "6px" : "0",
+                    backgroundColor: `rgba(0,0,0,${captionPreviewTheme.backgroundOpacity})`,
+                  }}
+                >
+                  Preview: {captionPreviewLines[0] || "Your caption style sample"}
+                </span>
+              </div>
+            </div>
           </label>
           <label className="text-xs text-slate-400">
             Caption Format
@@ -1121,7 +1185,7 @@ export function ClipEditorPanel({ video, initialClip, initialExports }: ClipEdit
                   <div className="text-sm text-slate-200">
                     <p className="font-medium">Export {item.id.slice(0, 8)}</p>
                     <p className="mt-1 text-xs text-slate-400">
-                      {item.aspect_ratio} • {item.caption_style || "no_style"} • {item.caption_format}
+                      {item.aspect_ratio} • {formatCaptionStyleLabel(item.caption_style)} • {item.caption_format}
                     </p>
                   </div>
                   <span
