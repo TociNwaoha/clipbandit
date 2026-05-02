@@ -71,9 +71,7 @@ class Video(Base):
     source_playlist_id: Mapped[str | None] = mapped_column(String(64), index=True)
     source_playlist_title: Mapped[str | None] = mapped_column(String(500))
     playlist_index: Mapped[int | None] = mapped_column(Integer, index=True)
-    import_parent_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("youtube_playlist_imports.id", ondelete="SET NULL"), index=True
-    )
+    import_parent_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
     embed_url: Mapped[str | None] = mapped_column(Text)
     thumbnail_url: Mapped[str | None] = mapped_column(Text)
     import_mode: Mapped[VideoImportMode] = mapped_column(
