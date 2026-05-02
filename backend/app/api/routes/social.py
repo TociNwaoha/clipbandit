@@ -54,6 +54,7 @@ TIKTOK_DEFAULT_PRIVACY_OPTIONS = [
     "FOLLOWER_OF_CREATOR",
     "SELF_ONLY",
 ]
+THREADS_PLATFORM = getattr(SocialPlatform, "threads", None)
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
@@ -337,7 +338,7 @@ async def list_social_providers(
                 "publish_ready": setup_status == "ready" and instagram_professional_count > 0,
                 "instagram_professional_count": instagram_professional_count,
             }
-        if adapter.platform == SocialPlatform.threads:
+        if THREADS_PLATFORM and adapter.platform == THREADS_PLATFORM:
             threads_profile_count = destination_counts["threads"].get("threads_profile", 0)
             threads_caps = adapter.capabilities()
             setup_details = {
@@ -672,7 +673,7 @@ async def create_publish_jobs(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Instagram publishing requires a connected Instagram professional account. Reconnect Instagram.",
                 )
-        if target.platform == SocialPlatform.threads:
+        if THREADS_PLATFORM and target.platform == THREADS_PLATFORM:
             destination_type = _destination_type_for_account(account)
             if destination_type != "threads_profile":
                 raise HTTPException(
