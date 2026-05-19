@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-chat"
     deepseek_timeout_sec: int = 30
+    carousel_claude_model: str = "claude-sonnet-4-6"
+    carousel_render_timeout_seconds: int = 240
+    carousel_reference_image_max_mb: int = 10
 
     # Social distribution
     social_token_encryption_key: str = "placeholder"

@@ -10,6 +10,7 @@ from app.models.publish_job import PublishJob
 from app.models.publish_attempt import PublishAttempt
 from app.models.youtube_playlist_import import YoutubePlaylistImport
 from app.models.video_import_state_event import VideoImportStateEvent
+from app.models.carousel_export import CarouselExport
 
 __all__ = [
     "User",
@@ -24,4 +25,5 @@ __all__ = [
     "PublishAttempt",
     "YoutubePlaylistImport",
     "VideoImportStateEvent",
+    "CarouselExport",
 ]

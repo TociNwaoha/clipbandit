@@ -28,6 +28,16 @@ const navItems = [
     ),
   },
   {
+    label: "Carousels",
+    href: "/carousels",
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="3" y="4" width="12" height="14" rx="2" stroke="currentColor" strokeWidth="2" />
+        <rect x="9" y="7" width="12" height="14" rx="2" stroke="currentColor" strokeWidth="2" />
+      </svg>
+    ),
+  },
+  {
     label: "Clips",
     href: "/clips",
     icon: (

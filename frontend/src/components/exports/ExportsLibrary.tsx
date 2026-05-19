@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/Card";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { api, ApiError } from "@/lib/api";
 import { formatCaptionColorVariantLabel, formatCaptionStyleLabel } from "@/lib/captionPreview";
-import { Export } from "@/types";
+import { CarouselExport, Export } from "@/types";
 
 const ACTIVE_EXPORT_STATUSES = new Set(["queued", "rendering"]);
 
@@ -49,11 +49,17 @@ interface SelectionState {
 
 interface ExportsLibraryProps {
   initialExports: Export[];
+  initialCarouselExports?: CarouselExport[];
   initialError?: string | null;
 }
 
-export function ExportsLibrary({ initialExports, initialError = null }: ExportsLibraryProps) {
+export function ExportsLibrary({
+  initialExports,
+  initialCarouselExports = [],
+  initialError = null,
+}: ExportsLibraryProps) {
   const [exports, setExports] = useState<Export[]>(initialExports);
+  const [carouselExports, setCarouselExports] = useState<CarouselExport[]>(initialCarouselExports);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(initialError);
   const [retryingExportId, setRetryingExportId] = useState<string | null>(null);
@@ -69,8 +75,12 @@ export function ExportsLibrary({ initialExports, initialError = null }: ExportsL
     setLoading(true);
     setError(null);
     try {
-      const latest = await api.get<Export[]>("/api/exports");
-      setExports(latest);
+      const [latestVideoExports, latestCarouselExports] = await Promise.all([
+        api.get<Export[]>("/api/exports"),
+        api.get<CarouselExport[]>("/api/carousels/exports"),
+      ]);
+      setExports(latestVideoExports);
+      setCarouselExports(latestCarouselExports);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to load exports");
     } finally {
@@ -360,6 +370,53 @@ export function ExportsLibrary({ initialExports, initialError = null }: ExportsL
           </Card>
         );
       })}
+
+      <Card>
+        <h3 className="text-base font-semibold text-[var(--app-text)]">Carousel Exports</h3>
+        {carouselExports.length === 0 ? (
+          <p className="mt-2 text-sm text-[var(--app-muted)]">No carousel exports yet.</p>
+        ) : (
+          <div className="mt-3 space-y-3">
+            {carouselExports.map((item) => (
+              <div
+                key={item.id}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-[var(--app-border)] bg-[var(--app-surface-soft)] p-3"
+              >
+                <div>
+                  <p className="text-sm font-medium text-[var(--app-text)]">
+                    {item.title || "Untitled carousel"} · {item.template_id}
+                  </p>
+                  <p className="mt-1 text-xs text-[var(--app-muted)]">
+                    {item.slide_count} slides • Created {formatRelativeTime(item.created_at)}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  {item.preview_url ? (
+                    <a
+                      href={item.preview_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-sm text-[#1D3FD0] hover:text-[#1633B8]"
+                    >
+                      Open preview
+                    </a>
+                  ) : null}
+                  {item.zip_url ? (
+                    <a
+                      href={item.zip_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-sm text-[#1D3FD0] hover:text-[#1633B8]"
+                    >
+                      Download zip
+                    </a>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
     </div>
   );
 }

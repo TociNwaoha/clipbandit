@@ -236,6 +236,81 @@ export interface Export {
   updated_at: string;
 }
 
+export interface CarouselTemplate {
+  id: string;
+  name: string;
+  description: string;
+  renderer: string;
+  preview_url: string;
+  default_slides: number;
+}
+
+export type CarouselSlideType = "hook" | "body" | "cta";
+
+export interface CarouselSlide {
+  type: CarouselSlideType | string;
+  title?: string;
+  text?: string;
+  subtitle?: string;
+  body?: string;
+  bullets?: string[];
+  cta_action?: string;
+  button_text?: string;
+  glow?: string;
+  image?: string;
+  annotation?: string;
+  label?: string;
+  subheading?: string;
+  [key: string]: unknown;
+}
+
+export interface CarouselConfig {
+  title: string;
+  profile: {
+    display_name: string;
+    handle: string;
+  };
+  renderer?: string | null;
+  slides: CarouselSlide[];
+  [key: string]: unknown;
+}
+
+export interface CarouselGenerateResponse {
+  config: CarouselConfig;
+  provider_used: string;
+}
+
+export interface CarouselRenderedSlide {
+  index: number;
+  key: string;
+  url: string;
+}
+
+export interface CarouselRenderResponse {
+  workspace_id: string;
+  slides: CarouselRenderedSlide[];
+  zip: {
+    key: string;
+    url: string;
+  };
+}
+
+export interface CarouselExport {
+  id: string;
+  user_id: string;
+  template_id: string;
+  title: string | null;
+  config_json: CarouselConfig;
+  slide_keys_json: string[];
+  zip_key: string;
+  preview_key: string;
+  slide_count: number;
+  zip_url?: string | null;
+  preview_url?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export type JobStatus = "queued" | "running" | "done" | "failed";
 
 export interface Job {

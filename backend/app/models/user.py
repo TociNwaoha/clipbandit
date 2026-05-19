@@ -38,3 +38,6 @@ class User(Base):
     publish_jobs: Mapped[list["PublishJob"]] = relationship(
         "PublishJob", back_populates="user", cascade="all, delete-orphan"
     )
+    carousel_exports: Mapped[list["CarouselExport"]] = relationship(
+        "CarouselExport", back_populates="user", cascade="all, delete-orphan"
+    )
