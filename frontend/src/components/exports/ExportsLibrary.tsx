@@ -63,6 +63,8 @@ export function ExportsLibrary({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(initialError);
   const [retryingExportId, setRetryingExportId] = useState<string | null>(null);
+  const [deletingVideoExportId, setDeletingVideoExportId] = useState<string | null>(null);
+  const [deletingCarouselExportId, setDeletingCarouselExportId] = useState<string | null>(null);
   const [copyMessageByExportId, setCopyMessageByExportId] = useState<Record<string, string>>({});
   const [selectionByExportId, setSelectionByExportId] = useState<Record<string, SelectionState>>({});
 
@@ -138,6 +140,42 @@ export function ExportsLibrary({
       setError(err instanceof ApiError ? err.message : "Failed to retry export");
     } finally {
       setRetryingExportId(null);
+    }
+  };
+
+  const deleteVideoExport = async (exportId: string, exportStatus: string) => {
+    if (ACTIVE_EXPORT_STATUSES.has(exportStatus)) {
+      setError("Cannot delete while rendering");
+      return;
+    }
+    const confirmed = window.confirm("Delete this export? This removes the row and associated files.");
+    if (!confirmed) return;
+
+    setDeletingVideoExportId(exportId);
+    setError(null);
+    try {
+      await api.delete<void>(`/api/exports/${exportId}`);
+      setExports((prev) => prev.filter((item) => item.id !== exportId));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to delete export");
+    } finally {
+      setDeletingVideoExportId(null);
+    }
+  };
+
+  const deleteCarouselExport = async (exportId: string) => {
+    const confirmed = window.confirm("Delete this carousel export? This removes the row and associated files.");
+    if (!confirmed) return;
+
+    setDeletingCarouselExportId(exportId);
+    setError(null);
+    try {
+      await api.delete<void>(`/api/carousels/exports/${exportId}`);
+      setCarouselExports((prev) => prev.filter((item) => item.id !== exportId));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to delete carousel export");
+    } finally {
+      setDeletingCarouselExportId(null);
     }
   };
 
@@ -284,7 +322,18 @@ export function ExportsLibrary({
                       {retryingExportId === item.id ? "Retrying..." : "Retry"}
                     </button>
                   ) : null}
+                  <button
+                    type="button"
+                    disabled={ACTIVE_EXPORT_STATUSES.has(item.status) || deletingVideoExportId === item.id}
+                    onClick={() => void deleteVideoExport(item.id, item.status)}
+                    className="rounded-md border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {deletingVideoExportId === item.id ? "Deleting..." : "Delete"}
+                  </button>
                 </div>
+                {ACTIVE_EXPORT_STATUSES.has(item.status) ? (
+                  <p className="mt-2 text-xs text-[var(--app-muted)]">Cannot delete while rendering.</p>
+                ) : null}
 
                 <div className="mt-4 rounded-md border border-[var(--app-border)] bg-[var(--app-surface-soft)] p-3">
                   <p className="text-xs font-medium uppercase tracking-wide text-[var(--app-muted)]">AI Copy</p>
@@ -411,6 +460,14 @@ export function ExportsLibrary({
                       Download zip
                     </a>
                   ) : null}
+                  <button
+                    type="button"
+                    disabled={deletingCarouselExportId === item.id}
+                    onClick={() => void deleteCarouselExport(item.id)}
+                    className="rounded-md border border-red-200 px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {deletingCarouselExportId === item.id ? "Deleting..." : "Delete"}
+                  </button>
                 </div>
               </div>
             ))}

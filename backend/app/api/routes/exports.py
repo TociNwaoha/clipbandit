@@ -1,7 +1,7 @@
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -230,6 +230,56 @@ async def get_export(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Export not found")
     export, clip, video = row
     return _to_response(export, clip, video)
+
+
+@router.delete("/exports/{export_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_export(
+    export_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    logger.info("[exports] delete requested user_id=%s export_id=%s", current_user.id, export_id)
+    result = await db.execute(
+        select(Export).where(Export.id == export_id, Export.user_id == current_user.id)
+    )
+    export = result.scalar_one_or_none()
+    if not export:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Export not found")
+
+    if export.status in ACTIVE_EXPORT_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot delete an export while it is queued or rendering",
+        )
+
+    storage_keys: set[str] = set()
+    if export.storage_key:
+        storage_keys.add(export.storage_key)
+    if export.srt_key:
+        storage_keys.add(export.srt_key)
+
+    storage_delete_failures = 0
+    for key in storage_keys:
+        try:
+            deleted = r2_client.delete_file(key)
+            if not deleted:
+                storage_delete_failures += 1
+                logger.warning("[exports] storage key missing during delete export_id=%s key=%s", export.id, key)
+        except Exception as exc:
+            storage_delete_failures += 1
+            logger.warning("[exports] best-effort storage delete failed export_id=%s key=%s error=%s", export.id, key, exc)
+
+    await db.delete(export)
+    await db.commit()
+    logger.info(
+        "[exports] delete completed user_id=%s export_id=%s export_status=%s storage_keys=%s storage_delete_failures=%s",
+        current_user.id,
+        export_id,
+        export.status,
+        len(storage_keys),
+        storage_delete_failures,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/public/exports/{export_id}/share", response_model=PublicExportShareResponse)

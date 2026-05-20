@@ -1,7 +1,7 @@
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -157,3 +157,54 @@ async def list_carousel_exports(
     )
     rows = result.scalars().all()
     return [_with_signed_urls(row) for row in rows]
+
+
+@router.delete("/carousels/exports/{export_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_carousel_export(
+    export_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    logger.info("[carousels] delete export requested user_id=%s export_id=%s", current_user.id, export_id)
+    result = await db.execute(
+        select(CarouselExport).where(CarouselExport.id == export_id, CarouselExport.user_id == current_user.id)
+    )
+    row = result.scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Carousel export not found")
+
+    storage_keys: set[str] = set()
+    if row.zip_key:
+        storage_keys.add(row.zip_key)
+    if row.preview_key:
+        storage_keys.add(row.preview_key)
+    for key in list(row.slide_keys_json or []):
+        if key:
+            storage_keys.add(str(key))
+
+    storage_delete_failures = 0
+    for key in storage_keys:
+        try:
+            deleted = r2_client.delete_file(key)
+            if not deleted:
+                storage_delete_failures += 1
+                logger.warning("[carousels] storage key missing during delete export_id=%s key=%s", row.id, key)
+        except Exception as exc:
+            storage_delete_failures += 1
+            logger.warning(
+                "[carousels] best-effort storage delete failed export_id=%s key=%s error=%s",
+                row.id,
+                key,
+                exc,
+            )
+
+    await db.delete(row)
+    await db.commit()
+    logger.info(
+        "[carousels] delete export completed user_id=%s export_id=%s storage_keys=%s storage_delete_failures=%s",
+        current_user.id,
+        export_id,
+        len(storage_keys),
+        storage_delete_failures,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
