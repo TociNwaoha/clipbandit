@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
 
-const navItems = [
+const workspaceNavItems = [
   {
     label: "Dashboard",
     href: "/dashboard",
@@ -84,6 +84,33 @@ const navItems = [
   },
 ];
 
+const aiCmoNavItems = [
+  {
+    label: "Content Queue",
+    href: "/content-queue",
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M8 6H21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        <path d="M8 12H21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        <path d="M8 18H21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        <circle cx="4" cy="6" r="1" fill="currentColor" />
+        <circle cx="4" cy="12" r="1" fill="currentColor" />
+        <circle cx="4" cy="18" r="1" fill="currentColor" />
+      </svg>
+    ),
+  },
+  {
+    label: "Brand Setup",
+    href: "/brand-setup",
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 15L8.5 17L9.5 13L6.5 10.5L10.5 10L12 6.5L13.5 10L17.5 10.5L14.5 13L15.5 17L12 15Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+      </svg>
+    ),
+  },
+];
+
 export function Sidebar() {
   const pathname = usePathname();
   const { data: session } = useSession();
@@ -91,10 +118,9 @@ export function Sidebar() {
   const initials = userEmail.slice(0, 2).toUpperCase();
 
   return (
-    <aside className="flex flex-col w-60 min-h-screen bg-white border-r border-[var(--app-border)]">
-      {/* Logo */}
-      <div className="flex items-center gap-2.5 px-5 py-5 border-b border-[var(--app-border)]">
-        <div className="w-7 h-7 rounded-md bg-[var(--app-primary)] flex items-center justify-center flex-shrink-0">
+    <aside className="flex min-h-screen w-60 flex-col border-r border-[var(--app-border)] bg-white">
+      <div className="flex items-center gap-2.5 border-b border-[var(--app-border)] px-5 py-5">
+        <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-[var(--app-primary)]">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M5 3L19 12L5 21V3Z" fill="white" />
           </svg>
@@ -102,47 +128,65 @@ export function Sidebar() {
         <span className="app-display text-base font-bold tracking-tight text-[var(--app-text)]">PostBandit</span>
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 px-3 py-4 space-y-0.5">
-        {navItems.map((item) => {
-          const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`
-                flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors
-                ${isActive
-                  ? "bg-[rgba(29,63,208,0.1)] text-[var(--app-primary)]"
-                  : "text-[var(--app-muted)] hover:text-[var(--app-text)] hover:bg-[#F4F8FF]"
-                }
-              `}
-            >
-              <span className={isActive ? "text-[var(--app-primary)]" : "text-[var(--app-subtle)]"}>{item.icon}</span>
-              {item.label}
-            </Link>
-          );
-        })}
+      <nav className="flex-1 px-3 py-4 space-y-3">
+        <div className="space-y-0.5">
+          {workspaceNavItems.map((item) => {
+            const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`
+                  flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors
+                  ${isActive
+                    ? "bg-[rgba(29,63,208,0.1)] text-[var(--app-primary)]"
+                    : "text-[var(--app-muted)] hover:text-[var(--app-text)] hover:bg-[#F4F8FF]"
+                  }
+                `}
+              >
+                <span className={isActive ? "text-[var(--app-primary)]" : "text-[var(--app-subtle)]"}>{item.icon}</span>
+                {item.label}
+              </Link>
+            );
+          })}
+        </div>
+        <div className="pt-2">
+          <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--app-subtle)]">AI CMO</p>
+          <div className="space-y-0.5">
+            {aiCmoNavItems.map((item) => {
+              const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`
+                    flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors
+                    ${isActive
+                      ? "bg-[rgba(29,63,208,0.1)] text-[var(--app-primary)]"
+                      : "text-[var(--app-muted)] hover:text-[var(--app-text)] hover:bg-[#F4F8FF]"
+                    }
+                  `}
+                >
+                  <span className={isActive ? "text-[var(--app-primary)]" : "text-[var(--app-subtle)]"}>{item.icon}</span>
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>
+        </div>
       </nav>
 
-      {/* User footer */}
-      <div className="px-3 py-4 border-t border-[var(--app-border)]">
-        <div className="flex items-center gap-3 px-2 mb-2">
-          <div className="w-8 h-8 rounded-full bg-[rgba(29,63,208,0.1)] flex items-center justify-center flex-shrink-0">
+      <div className="border-t border-[var(--app-border)] px-3 py-4">
+        <div className="mb-2 flex items-center gap-3 px-2">
+          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[rgba(29,63,208,0.1)]">
             <span className="text-xs font-semibold text-[var(--app-primary)]">{initials}</span>
           </div>
-          <p className="text-xs text-[var(--app-muted)] truncate flex-1">{userEmail}</p>
+          <p className="flex-1 truncate text-xs text-[var(--app-muted)]">{userEmail}</p>
         </div>
         <button
           onClick={() => signOut({ callbackUrl: "/login" })}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-[var(--app-subtle)]
-                     hover:text-[var(--app-text)] hover:bg-[#F4F8FF] transition-colors"
+          className="w-full rounded-lg px-3 py-2 text-left text-sm text-[var(--app-subtle)] transition-colors hover:bg-[#F4F8FF] hover:text-[var(--app-text)]"
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M9 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V5C3 4.46957 3.21071 3.96086 3.58579 3.58579C3.96086 3.21071 4.46957 3 5 3H9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            <path d="M16 17L21 12L16 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            <path d="M21 12H9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
           Sign out
         </button>
       </div>

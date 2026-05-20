@@ -8,16 +8,17 @@ import { authOptions } from "@/lib/auth";
 export default async function NewCarouselPage({
   searchParams,
 }: {
-  searchParams?: { template?: string };
+  searchParams?: { template?: string; queueItem?: string };
 }) {
   const session = await getServerSession(authOptions);
   if (!session) redirect("/login");
 
   const initialTemplateId = typeof searchParams?.template === "string" ? searchParams.template : undefined;
+  const initialQueueItemId = typeof searchParams?.queueItem === "string" ? searchParams.queueItem : undefined;
 
   return (
     <DashboardLayout title="New Carousel">
-      <SlideEditor initialTemplateId={initialTemplateId} />
+      <SlideEditor initialTemplateId={initialTemplateId} initialQueueItemId={initialQueueItemId} />
     </DashboardLayout>
   );
 }

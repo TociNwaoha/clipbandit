@@ -61,9 +61,10 @@ function readFileAsBase64(file: File): Promise<string> {
 
 interface SlideEditorProps {
   initialTemplateId?: string;
+  initialQueueItemId?: string;
 }
 
-export function SlideEditor({ initialTemplateId }: SlideEditorProps) {
+export function SlideEditor({ initialTemplateId, initialQueueItemId }: SlideEditorProps) {
   const [templates, setTemplates] = useState<CarouselTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState(initialTemplateId || "");
   const [topic, setTopic] = useState("");
@@ -78,6 +79,7 @@ export function SlideEditor({ initialTemplateId }: SlideEditorProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  const [loadingQueueItem, setLoadingQueueItem] = useState(false);
 
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
   const [dragIndex, setDragIndex] = useState<number | null>(null);
@@ -109,6 +111,38 @@ export function SlideEditor({ initialTemplateId }: SlideEditorProps) {
     };
   }, [initialTemplateId]);
 
+
+
+  useEffect(() => {
+    if (!initialQueueItemId) return;
+    let mounted = true;
+
+    const loadQueueItem = async () => {
+      setLoadingQueueItem(true);
+      setError(null);
+      try {
+        const item = await api.get<{ config: CarouselConfig; status: string }>(`/api/content-queue/${initialQueueItemId}`);
+        if (!mounted) return;
+        setConfig(item.config);
+        const renderer = typeof item.config.renderer === "string" ? item.config.renderer : "";
+        const match = templates.find((template) => template.renderer === renderer || template.id === renderer);
+        if (match) {
+          setSelectedTemplateId(match.id);
+        }
+        setInfo("Loaded queue item config for editing.");
+      } catch (err) {
+        if (!mounted) return;
+        setError(err instanceof ApiError ? err.message : "Failed to load queue item.");
+      } finally {
+        if (mounted) setLoadingQueueItem(false);
+      }
+    };
+
+    void loadQueueItem();
+    return () => {
+      mounted = false;
+    };
+  }, [initialQueueItemId, templates]);
   const selectedTemplate = useMemo(
     () => templates.find((item) => item.id === selectedTemplateId) || null,
     [templates, selectedTemplateId]
@@ -247,7 +281,7 @@ export function SlideEditor({ initialTemplateId }: SlideEditorProps) {
 
   return (
     <div className="space-y-4">
-      {loadingTemplates ? (
+      {loadingTemplates || loadingQueueItem ? (
         <Card>
           <p className="text-sm text-[var(--app-muted)]">Loading carousel editor...</p>
         </Card>
