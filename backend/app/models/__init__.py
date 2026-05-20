@@ -11,6 +11,8 @@ from app.models.publish_attempt import PublishAttempt
 from app.models.youtube_playlist_import import YoutubePlaylistImport
 from app.models.video_import_state_event import VideoImportStateEvent
 from app.models.carousel_export import CarouselExport
+from app.models.brand_profile import BrandProfile
+from app.models.content_queue_item import ContentQueueItem
 
 __all__ = [
     "User",
@@ -26,4 +28,6 @@ __all__ = [
     "YoutubePlaylistImport",
     "VideoImportStateEvent",
     "CarouselExport",
+    "BrandProfile",
+    "ContentQueueItem",
 ]

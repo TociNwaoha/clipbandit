@@ -1,4 +1,5 @@
 from celery import Celery
+from celery.schedules import crontab
 
 from app.config import settings
 
@@ -14,6 +15,7 @@ celery_app = Celery(
         "app.worker.tasks.score",
         "app.worker.tasks.render",
         "app.worker.tasks.publish",
+        "app.worker.tasks.content_generation",
     ],
 )
 
@@ -36,6 +38,10 @@ if settings.stale_queued_upload_cleanup_enabled:
         "schedule": 3600.0,
         "args": (bool(settings.stale_queued_upload_cleanup_dry_run),),
     }
+beat_schedule["generate-daily-content"] = {
+    "task": "generate_daily_content",
+    "schedule": crontab(hour=8, minute=0),
+}
 
 celery_app.conf.update(
     task_serializer="json",
@@ -52,6 +58,8 @@ celery_app.conf.update(
         "app.worker.tasks.score.*": {"queue": "score"},
         "app.worker.tasks.render.*": {"queue": "render"},
         "app.worker.tasks.publish.*": {"queue": "publish"},
+        "app.worker.tasks.content_generation.*": {"queue": "ingest"},
+        "generate_daily_content": {"queue": "ingest"},
     },
     task_queues={
         "ingest": {},

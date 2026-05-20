@@ -431,3 +431,36 @@ export interface FullVideoExportResponse {
   export_status: string;
   reused_existing_export: boolean;
 }
+
+
+export interface BrandProfile {
+  id: string;
+  user_id: string;
+  display_name: string;
+  handle: string;
+  niche: string;
+  target_audience: string;
+  tone: string;
+  use_phrases: string[];
+  avoid_phrases: string[];
+  post_frequency: number;
+  preferred_platforms: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export type ContentQueueStatus = "draft" | "rendering" | "ready" | "approved" | "rejected" | "posted";
+
+export interface ContentQueueItem {
+  id: string;
+  user_id: string;
+  content_type: string;
+  config: CarouselConfig;
+  slide_urls: string[];
+  status: ContentQueueStatus;
+  platforms: string[];
+  scheduled_at: string | null;
+  generation_topic: string | null;
+  created_at: string;
+  updated_at: string;
+}

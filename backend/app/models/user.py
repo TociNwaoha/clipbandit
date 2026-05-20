@@ -41,3 +41,9 @@ class User(Base):
     carousel_exports: Mapped[list["CarouselExport"]] = relationship(
         "CarouselExport", back_populates="user", cascade="all, delete-orphan"
     )
+    brand_profile: Mapped["BrandProfile | None"] = relationship(
+        "BrandProfile", back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )
+    content_queue_items: Mapped[list["ContentQueueItem"]] = relationship(
+        "ContentQueueItem", back_populates="user", cascade="all, delete-orphan"
+    )
