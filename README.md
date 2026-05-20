@@ -17,6 +17,37 @@ cp .env.example .env
 docker-compose up --build
 ```
 
+## Deploy Guard
+
+Use this after every VPS deploy to catch runtime URL/env drift before users do:
+
+```bash
+cd /opt/clipbandit
+bash tools/deploy_guard.sh
+```
+
+What it validates:
+
+- `backend`, `frontend`, `worker` are running
+- frontend runtime env values:
+  - `NEXTAUTH_URL`
+  - `NEXT_PUBLIC_API_URL`
+  - `INTERNAL_API_URL`
+- backend health (`/health`)
+- CORS headers for `https://postbandit.com` on `https://api.postbandit.com/api/videos`
+- unauthenticated public API behavior (`/api/videos` returns `401`/`403`)
+
+Optional overrides:
+
+```bash
+APP_DOMAIN=https://postbandit.com \
+API_DOMAIN=https://api.postbandit.com \
+EXPECTED_NEXTAUTH_URL=https://postbandit.com \
+EXPECTED_NEXT_PUBLIC_API_URL=https://api.postbandit.com \
+EXPECTED_INTERNAL_API_URL=http://backend:8000 \
+bash tools/deploy_guard.sh
+```
+
 ## Access
 
 | Service | URL |
