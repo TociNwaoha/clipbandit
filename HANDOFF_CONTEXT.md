@@ -82,7 +82,7 @@ identifiers still use ClipBandit.
 ## Current Repository State
 
 Last reviewed: 2026-06-07
-Current local base commit: `243ab24`
+Current local release commit: `2db21e5`
 
 - The working tree contains substantial uncommitted changes. Do not reset,
   discard, or overwrite them.
@@ -98,8 +98,8 @@ Current local base commit: `243ab24`
 
 ## Current Objective
 
-Status: `APPROVED_FOR_DEPLOY`
-Current owner: Reviewing agent
+Status: `DEPLOYED`
+Current owner: None
 
 Active task: Add eight researched carousel template designs and production renderers.
 
@@ -200,10 +200,13 @@ Validation:
   the frontend build because `VideosDashboard.tsx` imports it.
 - Two agents in separate clones cannot communicate through this file until it
   has been committed and pushed.
-- Production deployment status has not yet been established for this commit.
-- Exact-SHA deployment must account for the dirty VPS tree. A hard reset to a
-  carousel-only commit could discard currently deployed uncommitted production
-  work unless that work is already represented in the release SHA.
+- The VPS still contains unrelated live uncommitted work. The carousel release
+  was fast-forwarded without resetting those files.
+- Production `ANTHROPIC_API_KEY` currently returns HTTP 401. Carousel generation
+  remains operational through the configured DeepSeek fallback.
+- Production R2 settings are placeholders, so carousel render storage currently
+  falls back to container-local `/tmp/clipbandit-storage`. Configure valid R2
+  credentials before relying on generated carousel URLs as durable artifacts.
 - Provider integrations still require real OAuth and publish-path verification
   in the configured production environment.
 
@@ -218,17 +221,28 @@ Validation:
 
 ## Next Starting Point
 
-Commit the reviewed carousel files plus this handoff file with an explicit
-file list. Before deploying, verify whether the VPS can safely reset to the
-exact release SHA without dropping unrelated uncommitted production changes.
+Configure durable R2 credentials and replace or remove the invalid Anthropic
+credential. Re-run one carousel render after R2 is configured and verify the
+returned slide and ZIP URLs survive a backend container restart.
 
 ## Deployment Record
 
-Status: Approved for deploy, not deployed yet.
+Status: Deployed.
 
-- Reviewed commit SHA: Pending commit
-- Deployed commit SHA: Not set
-- Services rebuilt: Not set
-- `tools/deploy_guard.sh`: Not run
-- Feature smoke test: Not run
-- Rollback commit: `243ab24` unless a newer verified production commit is recorded
+- Reviewed commit SHA: `2db21e5e5fab748af2524cb866058294f2d810e3`
+- Deployed commit SHA: `2db21e5e5fab748af2524cb866058294f2d810e3`
+- Deployment time: 2026-06-07 14:58 UTC
+- Services rebuilt: `backend`, `frontend`
+- `tools/deploy_guard.sh`: PASS
+- Focused production-container tests: `21 passed, 1 warning in 6.17s`
+- Public smoke: `/carousels` returned the expected authenticated redirect
+  (`307`); `signal-brutalist.png` returned `200 image/png`
+- Feature smoke: 10 templates loaded; DeepSeek generated six
+  `editorial-sun` slides; renderer produced six PNGs and a ZIP URL
+- Deployment method: transferred the exact commit as a Git bundle and
+  fast-forwarded the VPS from `243ab24` because local GitHub HTTPS credentials
+  were unavailable
+- Backup branch: `backup/precarousel-20260607T145629Z`
+- Backup archive:
+  `/opt/clipbandit_backups/clipbandit-20260607T145629Z.tar.gz`
+- Rollback commit: `243ab2450038577ec3f5a60bb103f52b9267906d`
