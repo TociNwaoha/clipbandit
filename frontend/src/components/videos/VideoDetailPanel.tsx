@@ -83,6 +83,7 @@ export function VideoDetailPanel({ video, transcript, transcriptError, clips, cl
   const [batchLoading, setBatchLoading] = useState(false);
   const [batchError, setBatchError] = useState<string | null>(null);
   const [batchMessage, setBatchMessage] = useState<string | null>(null);
+  const [videoDisplayWidth, setVideoDisplayWidth] = useState(25);
 
   const transcriptText = useMemo(() => {
     if (!transcript) return "";
@@ -108,6 +109,7 @@ export function VideoDetailPanel({ video, transcript, transcriptError, clips, cl
 
   useEffect(() => {
     setBatchProfile(video.clip_profile || "viral");
+    setVideoDisplayWidth(25);
     setBatchError(null);
     setBatchMessage(null);
   }, [video.id, video.clip_profile]);
@@ -134,11 +136,29 @@ export function VideoDetailPanel({ video, transcript, transcriptError, clips, cl
   return (
     <div className="space-y-6">
       <Card>
-        <div className="flex flex-wrap items-center gap-3">
-          <h2 className="text-xl font-semibold text-[var(--app-text)]">{video.title || "Untitled Video"}</h2>
-          <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusStyles[displayStateKey] || statusStyles.queued}`}>
-            {displayStateLabel}
-          </span>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 className="text-xl font-semibold text-[var(--app-text)]">{video.title || "Untitled Video"}</h2>
+            <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusStyles[displayStateKey] || statusStyles.queued}`}>
+              {displayStateLabel}
+            </span>
+          </div>
+          {video.source_download_url || video.embed_url ? (
+            <label className="flex min-w-[210px] items-center gap-3 text-xs text-[var(--app-muted)]">
+              <span className="whitespace-nowrap">Video size</span>
+              <input
+                type="range"
+                min="25"
+                max="100"
+                step="5"
+                value={videoDisplayWidth}
+                onChange={(event) => setVideoDisplayWidth(Number(event.target.value))}
+                className="h-2 min-w-0 flex-1 cursor-pointer accent-[#1D3FD0]"
+                aria-label="Video player size"
+              />
+              <span className="w-9 text-right font-medium text-[var(--app-text)]">{videoDisplayWidth}%</span>
+            </label>
+          ) : null}
         </div>
         <div className="mt-4 flex flex-wrap gap-6 text-sm text-[var(--app-muted)]">
           <p>
@@ -170,26 +190,38 @@ export function VideoDetailPanel({ video, transcript, transcriptError, clips, cl
 
       {video.source_download_url ? (
         <Card>
-          <video
-            className="w-full rounded-lg border border-[var(--app-border)] bg-black"
-            controls
-            playsInline
-            preload="metadata"
-            src={video.source_download_url}
-          >
-            Your browser does not support the video tag.
-          </video>
+          <div className="flex justify-center">
+            <div
+              className="max-w-full transition-[width] duration-200"
+              style={{ width: `clamp(280px, ${videoDisplayWidth}%, 100%)` }}
+            >
+              <video
+                className="block h-auto w-full rounded-lg border border-[var(--app-border)] bg-black"
+                controls
+                playsInline
+                preload="metadata"
+                src={video.source_download_url}
+              >
+                Your browser does not support the video tag.
+              </video>
+            </div>
+          </div>
         </Card>
       ) : video.embed_url ? (
         <Card>
-          <div className="aspect-video w-full overflow-hidden rounded-lg border border-[var(--app-border)] bg-black">
-            <iframe
-              src={video.embed_url}
-              title={video.title || "YouTube embed"}
-              className="h-full w-full"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              allowFullScreen
-            />
+          <div className="flex justify-center">
+            <div
+              className="aspect-video max-w-full overflow-hidden rounded-lg border border-[var(--app-border)] bg-black transition-[width] duration-200"
+              style={{ width: `clamp(280px, ${videoDisplayWidth}%, 100%)` }}
+            >
+              <iframe
+                src={video.embed_url}
+                title={video.title || "YouTube embed"}
+                className="h-full w-full"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+              />
+            </div>
           </div>
         </Card>
       ) : null}

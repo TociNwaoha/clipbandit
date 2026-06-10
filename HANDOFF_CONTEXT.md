@@ -81,8 +81,8 @@ identifiers still use ClipBandit.
 
 ## Current Repository State
 
-Last reviewed: 2026-06-07
-Current local release commit: `2db21e5`
+Last reviewed: 2026-06-10
+Current local base commit: `55dfab0`
 
 - The working tree contains substantial uncommitted changes. Do not reset,
   discard, or overwrite them.
@@ -98,17 +98,14 @@ Current local release commit: `2db21e5`
 
 ## Current Objective
 
-Status: `DEPLOYED`
-Current owner: None
+Status: `APPROVED_FOR_DEPLOY`
+Current owner: Implementing/deploying agent
 
-Active task: Add eight researched carousel template designs and production renderers.
+Active task: Add an adjustable display-size slider to the full video detail player.
 
 Current ownership:
 
-- `backend/app/services/carousel.py`
-- `backend/app/services/carousel_renderer/render_modern.py`
-- `backend/tests/test_carousel_service.py`
-- `frontend/public/template-previews/`
+- `frontend/src/components/videos/VideoDetailPanel.tsx`
 - `HANDOFF_CONTEXT.md`
 
 The calendar task remains planned but is not owned or modified by this task.
@@ -146,49 +143,23 @@ production runtime status have not been fully verified in this handoff.
 
 ## Current Task Changes
 
-Task: Add eight more carousel designs based on current editorial, scrapbook,
-brutalist, data-card, glass, retro-futurist, luxury, and case-study patterns.
+Task: Add a display-size slider to `/videos/{id}` and make the full source
+player start at half of its previous displayed width.
 
 Files changed:
 
-- `HANDOFF_CONTEXT.md` (created)
-- `AGENTS.md` (contains an existing local handoff-guidance edit, but is outside
-  the declared carousel ownership and is not part of this reviewed commit)
-- `backend/app/services/carousel.py` (registered eight templates and persisted
-  `template_id` in normalized render config)
-- `backend/app/services/carousel_renderer/render_modern.py` (shared themed
-  renderer for hook, body, and CTA slides)
-- `backend/tests/test_carousel_service.py` (template registry and theme tests)
-- `frontend/public/template-previews/editorial-sun.png`
-- `frontend/public/template-previews/paper-notes.png`
-- `frontend/public/template-previews/signal-brutalist.png`
-- `frontend/public/template-previews/data-mint.png`
-- `frontend/public/template-previews/aurora-glass.png`
-- `frontend/public/template-previews/retro-future.png`
-- `frontend/public/template-previews/luxe-mono.png`
-- `frontend/public/template-previews/case-study.png`
+- `frontend/src/components/videos/VideoDetailPanel.tsx`
+- `HANDOFF_CONTEXT.md`
 
 Validation:
 
-- Confirmed the file follows the repository guidance in `AGENTS.md`.
-- Confirmed the repository is on `main` at `243ab24`, matching `origin/main`.
-- Confirmed `HANDOFF_CONTEXT.md` is currently untracked and therefore local-only.
-- Confirmed the calendar component is currently untracked while its dashboard
-  import is a tracked-file modification.
-- Confirmed `tools/deploy_guard.sh` validates containers, frontend runtime URLs,
-  backend health, CORS, and unauthenticated API behavior after deployment.
-- `PYTHONPATH=backend pytest -q backend/tests/test_carousel_service.py` was
-  attempted on the host and failed because `pytest` is not installed locally.
-- `python3 -m py_compile` passed for carousel service, renderer, and tests.
-- The same focused test suite was run in the project backend Docker image using
-  an isolated reviewed bundle: `21 passed, 1 warning in 6.00s`.
-- Rendered all six slide positions for all eight modern themes: 48 output PNGs
-  completed without errors.
-- Visually reviewed all eight regenerated 1080x1350 template preview PNGs.
-- Review fix applied: the patterned footer area is now cleared before footer
-  text so `signal-brutalist` and `retro-future` keep readable handles/counters.
+- Player starts at `25%`, half of the prior `50%` desktop width.
+- Slider supports `25%` through `100%` in 5% increments.
+- Player stays centered and preserves the source aspect ratio.
+- A 280px minimum keeps the player usable on narrow screens.
+- The same sizing behavior applies to direct video and embed playback.
 - `npm run build` passed in `frontend/`, including lint and TypeScript checks.
-- `git diff --check` passed for the reviewed carousel and handoff files.
+- `git diff --check` passed for the scoped frontend file.
 
 ## Risks And Unknowns
 
@@ -221,28 +192,16 @@ Validation:
 
 ## Next Starting Point
 
-Configure durable R2 credentials and replace or remove the invalid Anthropic
-credential. Re-run one carousel render after R2 is configured and verify the
-returned slide and ZIP URLs survive a backend container restart.
+Deploy the scoped frontend commit, verify `/videos/63ffc9a5-b821-4dd3-8ac4-11d2d14d5278`,
+and record the release SHA and deploy-guard result.
 
 ## Deployment Record
 
-Status: Deployed.
+Status: Approved for deploy, pending.
 
-- Reviewed commit SHA: `2db21e5e5fab748af2524cb866058294f2d810e3`
-- Deployed commit SHA: `2db21e5e5fab748af2524cb866058294f2d810e3`
-- Deployment time: 2026-06-07 14:58 UTC
-- Services rebuilt: `backend`, `frontend`
-- `tools/deploy_guard.sh`: PASS
-- Focused production-container tests: `21 passed, 1 warning in 6.17s`
-- Public smoke: `/carousels` returned the expected authenticated redirect
-  (`307`); `signal-brutalist.png` returned `200 image/png`
-- Feature smoke: 10 templates loaded; DeepSeek generated six
-  `editorial-sun` slides; renderer produced six PNGs and a ZIP URL
-- Deployment method: transferred the exact commit as a Git bundle and
-  fast-forwarded the VPS from `243ab24` because local GitHub HTTPS credentials
-  were unavailable
-- Backup branch: `backup/precarousel-20260607T145629Z`
-- Backup archive:
-  `/opt/clipbandit_backups/clipbandit-20260607T145629Z.tar.gz`
-- Rollback commit: `243ab2450038577ec3f5a60bb103f52b9267906d`
+- Reviewed commit SHA: Pending commit
+- Deployed commit SHA: Not set
+- Services rebuilt: Not set
+- `tools/deploy_guard.sh`: Not run
+- Feature smoke test: Not run
+- Rollback commit: `55dfab0d4d210346671355ea096c81a653315cdc`
