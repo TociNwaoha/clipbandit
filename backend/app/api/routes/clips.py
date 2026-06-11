@@ -15,9 +15,22 @@ from app.models.export import Export
 from app.models.user import User
 from app.models.clip import Clip
 from app.models.video import Video
-from app.schemas.clip import ClipOverlayAssetResponse, ClipResponse, ClipUpdateRequest
+from app.schemas.clip import (
+    ClipOverlayAssetResponse,
+    ClipResponse,
+    ClipUpdateRequest,
+    PlatformCopyFields,
+    PlatformCopyGenerateRequest,
+    PlatformCopyGenerateResponse,
+)
 from app.api.deps import get_current_user
-from app.services.ai_copy import AICopyUnavailableError, generate_clip_copy, provider_configured
+from app.services.ai_copy import (
+    AICopyError,
+    AICopyUnavailableError,
+    generate_clip_copy,
+    generate_platform_copy,
+    provider_configured,
+)
 from app.services.editor_quota import enforce_storage_hard_stop
 from app.services.r2 import r2_client
 
@@ -346,6 +359,71 @@ async def generate_copy_for_clip(
         len(generated.hashtag_options),
     )
     return _clip_to_response(clip)
+
+
+@router.post(
+    "/clips/{clip_id}/generate-platform-copy",
+    response_model=PlatformCopyGenerateResponse,
+)
+async def generate_platform_copy_for_clip(
+    clip_id: str,
+    body: PlatformCopyGenerateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        clip_uuid = UUID(clip_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid clip_id")
+
+    row = await db.execute(
+        select(Clip, Video)
+        .join(Video, Clip.video_id == Video.id)
+        .where(Clip.id == clip_uuid, Video.user_id == current_user.id)
+    )
+    clip_row = row.first()
+    if not clip_row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clip not found")
+    clip, video = clip_row
+
+    transcript_text = " ".join((clip.transcript_text or "").split())
+    if not transcript_text:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Clip transcript text is unavailable",
+        )
+    if not provider_configured():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="DeepSeek platform copy is unavailable",
+        )
+
+    try:
+        generated = generate_platform_copy(
+            transcript_text,
+            [platform.value for platform in body.platforms],
+            video_title=video.title,
+            topic_hint=body.topic_hint,
+        )
+    except AICopyUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+    except AICopyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+
+    return PlatformCopyGenerateResponse(
+        provider_used="deepseek",
+        results={
+            platform: PlatformCopyFields.model_validate(value)
+            for platform, value in generated.results.items()
+        },
+        errors=generated.errors,
+    )
 
 
 @router.patch("/clips/{clip_id}", response_model=ClipResponse)

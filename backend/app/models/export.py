@@ -26,8 +26,16 @@ class CaptionStyle(str, enum.Enum):
 
 
 class CaptionFormat(str, enum.Enum):
+    none = "none"
     burned_in = "burned_in"
     srt = "srt"
+
+
+class CaptionCadence(str, enum.Enum):
+    phrase = "phrase"
+    split_line = "split_line"
+    word_by_word = "word_by_word"
+    subtitle_block = "subtitle_block"
 
 
 class CaptionColorVariant(str, enum.Enum):
@@ -69,6 +77,11 @@ class Export(Base):
         SAEnum(CaptionColorVariant, name="caption_color_variant")
     )
     caption_format: Mapped[CaptionFormat] = mapped_column(SAEnum(CaptionFormat, name="caption_format"), nullable=False)
+    caption_cadence: Mapped[CaptionCadence] = mapped_column(
+        SAEnum(CaptionCadence, name="caption_cadence"),
+        nullable=False,
+        default=CaptionCadence.split_line,
+    )
     caption_vertical_position: Mapped[float | None] = mapped_column(Float)
     caption_scale: Mapped[float | None] = mapped_column(Float)
     frame_anchor_x: Mapped[float | None] = mapped_column(Float)
@@ -99,7 +112,7 @@ class Export(Base):
     clip: Mapped["Clip"] = relationship("Clip", back_populates="exports")
     user: Mapped["User"] = relationship("User", back_populates="exports")
     publish_jobs: Mapped[list["PublishJob"]] = relationship(
-        "PublishJob", back_populates="export", cascade="all, delete-orphan"
+        "PublishJob", back_populates="export", passive_deletes=True
     )
     editor_renders: Mapped[list["EditorRender"]] = relationship("EditorRender", back_populates="export")
     overlay_image_asset: Mapped["ClipOverlayAsset | None"] = relationship(

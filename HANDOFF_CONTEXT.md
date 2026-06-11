@@ -81,8 +81,8 @@ identifiers still use ClipBandit.
 
 ## Current Repository State
 
-Last reviewed: 2026-06-10
-Current local base commit: `55dfab0`
+Last reviewed: 2026-06-11
+Current local base commit: `a788f35`
 
 - The working tree contains substantial uncommitted changes. Do not reset,
   discard, or overwrite them.
@@ -98,7 +98,7 @@ Current local base commit: `55dfab0`
 
 ## Current Objective
 
-Status: `IN_PROGRESS`
+Status: `READY_FOR_REVIEW`
 Current owner: Codex
 
 Active task: Implement durable social scheduling/history, caption cadence and
@@ -156,16 +156,48 @@ production runtime status have not been fully verified in this handoff.
 
 ## Current Task Changes
 
-Task started. No new implementation files changed yet.
+Implementation completed locally and under review:
 
-Preflight:
+- Prerequisite editor/overlay work, including migrations `0014` and `0015`,
+  was committed on the feature branch as `d6df507`.
+- Added migration `0016` for application-owned publish scheduling, durable
+  history references, timezone, and destination/content snapshots.
+- Added migration `0017` for caption output `none` and independent caption
+  cadence (`phrase`, `split_line`, `word_by_word`, `subtitle_block`).
+- Scheduled jobs now remain in PostgreSQL until the once-per-minute Beat task
+  queues them. Publish workers atomically claim queued jobs to prevent duplicate
+  delivery and recover stale queued schedule dispatches.
+- Added publish PATCH and calendar APIs, active-publish deletion guards,
+  historical nullable references, account-disconnect handling, and enriched
+  calendar snapshots.
+- Added no-caption rendering, cadence-aware SRT/ASS cue generation, cadence
+  propagation through export create/dedupe/retry/full-video flows, and basic
+  editor controls.
+- Added one-request DeepSeek platform copy generation with per-platform
+  validation and partial-result errors.
+- Extended the dashboard calendar with month/week views, platform/status
+  filters, historical events, event management drawer, and existing clip/
+  carousel creation entry points.
+- Added `worker-beat` to Compose and the deploy guard.
+- Preserved unrelated `AGENTS.md`, `bugfixes.md`, and video-detail changes
+  outside the scoped release staging set.
 
-- Existing working tree contains uncommitted editor, clip overlay, social
-  filtering/calendar, connection UI, and retention work.
-- Migrations `0014` and `0015` are present locally but uncommitted.
-- Host Docker and host pytest are unavailable; backend compile runs locally,
-  while migration/tests will run in the VPS backend container before deploy.
-- Existing unrelated video-detail size work remains preserved.
+Validation completed:
+
+- `PYTHONPYCACHEPREFIX=/tmp/pycache_clipbandit python3 -m compileall app`: PASS.
+- `cd frontend && npm run build`: PASS.
+- `git diff --check`: PASS.
+- Host runtime import/pytest/Alembic checks are blocked because host Python does
+  not have project dependencies; run them in the backend container before
+  deployment.
+
+Reviewed release scope:
+
+- The staged release contains only the explicit publishing, caption, calendar,
+  platform-copy, connection/calendar compatibility, Compose, tests, and handoff
+  files listed by `git diff --cached --name-only`.
+- `AGENTS.md` and `bugfixes.md` remain outside the release commit.
+- VPS reported Alembic head `0015` before these migrations were created.
 
 ## Risks And Unknowns
 

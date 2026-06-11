@@ -113,50 +113,57 @@ def render_export(self, export_id: str, job_id: str | None = None):
             aspect_ratio_value = _enum_value(export.aspect_ratio)
             target_width, target_height = resolve_output_dimensions(aspect_ratio_value, str(source_path))
 
-            transcript_rows = (
-                db.execute(
-                    select(TranscriptSegment)
-                    .where(
-                        TranscriptSegment.video_id == video.id,
-                        TranscriptSegment.start_time < clip.end_time,
-                        TranscriptSegment.end_time > clip.start_time,
-                    )
-                    .order_by(TranscriptSegment.start_time.asc())
-                )
-                .scalars()
-                .all()
-            )
-            logger.info(
-                "[render] caption generation start export_id=%s transcript_words=%s",
-                export.id,
-                len(transcript_rows),
-            )
-            cues = build_subtitle_cues(
-                transcript_rows,
-                clip_start=float(clip.start_time),
-                clip_end=float(clip.end_time),
-            )
-            if not cues:
-                raise RenderPipelineError("No transcript timing found for this clip window; cannot render captions")
-
-            srt_local_path = tmp_dir / "captions.srt"
-            write_srt(cues, str(srt_local_path))
-
+            srt_local_path: Path | None = None
             ass_local_path: Path | None = None
-            if export.caption_format == CaptionFormat.burned_in:
-                ass_local_path = tmp_dir / "captions.ass"
-                write_ass(
-                    cues,
-                    str(ass_local_path),
-                    _enum_value(export.caption_style),
-                    _enum_value(export.caption_color_variant or CaptionColorVariant.classic),
-                    aspect_ratio_value,
-                    target_width,
-                    target_height,
-                    export.caption_vertical_position,
-                    export.caption_scale,
+            if export.caption_format != CaptionFormat.none:
+                transcript_rows = (
+                    db.execute(
+                        select(TranscriptSegment)
+                        .where(
+                            TranscriptSegment.video_id == video.id,
+                            TranscriptSegment.start_time < clip.end_time,
+                            TranscriptSegment.end_time > clip.start_time,
+                        )
+                        .order_by(TranscriptSegment.start_time.asc())
+                    )
+                    .scalars()
+                    .all()
                 )
-            logger.info("[render] caption generation end export_id=%s cues=%s", export.id, len(cues))
+                logger.info(
+                    "[render] caption generation start export_id=%s transcript_words=%s cadence=%s",
+                    export.id,
+                    len(transcript_rows),
+                    _enum_value(export.caption_cadence),
+                )
+                cues = build_subtitle_cues(
+                    transcript_rows,
+                    clip_start=float(clip.start_time),
+                    clip_end=float(clip.end_time),
+                    cadence=_enum_value(export.caption_cadence),
+                )
+                if not cues:
+                    raise RenderPipelineError(
+                        "Caption timing is unavailable for this clip. Choose caption output None or regenerate the transcript."
+                    )
+
+                srt_local_path = tmp_dir / "captions.srt"
+                write_srt(cues, str(srt_local_path))
+                if export.caption_format == CaptionFormat.burned_in:
+                    ass_local_path = tmp_dir / "captions.ass"
+                    write_ass(
+                        cues,
+                        str(ass_local_path),
+                        _enum_value(export.caption_style),
+                        _enum_value(export.caption_color_variant or CaptionColorVariant.classic),
+                        aspect_ratio_value,
+                        target_width,
+                        target_height,
+                        export.caption_vertical_position,
+                        export.caption_scale,
+                    )
+                logger.info("[render] caption generation end export_id=%s cues=%s", export.id, len(cues))
+            else:
+                logger.info("[render] captions disabled export_id=%s", export.id)
 
             output_path = tmp_dir / "output.mp4"
             overlay_image_path: Path | None = None
@@ -234,7 +241,7 @@ def render_export(self, export_id: str, job_id: str | None = None):
             export.url_expires_at = None
             export.srt_key = None
 
-            if export.caption_format == CaptionFormat.srt:
+            if export.caption_format == CaptionFormat.srt and srt_local_path:
                 srt_key = export_srt_key(str(export.user_id), str(clip.id), str(export.id))
                 r2_client.upload_file(str(srt_local_path), srt_key)
                 export.srt_key = srt_key

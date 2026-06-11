@@ -16,6 +16,7 @@ from app.models.clip import Clip
 from app.models.clip_overlay_asset import ClipOverlayAsset
 from app.models.export import Export
 from app.models.job import Job, JobStatus
+from app.models.publish_job import PublishJob, PublishStatus
 from app.models.transcript import TranscriptSegment
 from app.models.user import User
 from app.models.video import (
@@ -1387,6 +1388,22 @@ async def delete_video(
     clip_result = await db.execute(select(Clip).where(Clip.video_id == video.id))
     clips = clip_result.scalars().all()
     clip_ids = [clip.id for clip in clips]
+    if clip_ids:
+        active_publish_job = await db.scalar(
+            select(PublishJob.id)
+            .where(
+                PublishJob.clip_id.in_(clip_ids),
+                PublishJob.status.in_(
+                    [PublishStatus.scheduled, PublishStatus.queued, PublishStatus.publishing]
+                ),
+            )
+            .limit(1)
+        )
+        if active_publish_job:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Cannot delete a video with an active scheduled or publishing job",
+            )
     for clip in clips:
         if clip.thumbnail_key:
             storage_keys.add(clip.thumbnail_key)

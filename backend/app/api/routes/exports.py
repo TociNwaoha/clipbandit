@@ -13,6 +13,7 @@ from app.models.clip import Clip
 from app.models.clip_overlay_asset import ClipOverlayAsset
 from app.models.export import CaptionColorVariant, Export, ExportStatus
 from app.models.job import Job, JobStatus
+from app.models.publish_job import PublishJob, PublishStatus
 from app.models.user import User
 from app.models.video import Video
 from app.schemas.export import ExportCreate, ExportResponse, PublicExportShareResponse
@@ -75,6 +76,11 @@ def _derived_download_url(storage_key: str | None) -> str | None:
 def _clip_thumbnail_url(clip: Clip | None) -> str | None:
     if not clip or not clip.thumbnail_key:
         return None
+    try:
+        return r2_client.get_presigned_download_url(clip.thumbnail_key)
+    except Exception as exc:
+        logger.warning("[exports] failed to derive thumbnail URL for clip_id=%s: %s", clip.id, exc)
+        return None
 
 
 def _share_description(clip: Clip | None, video: Video | None) -> str:
@@ -93,11 +99,6 @@ def _share_description(clip: Clip | None, video: Video | None) -> str:
     if video and video.title:
         return video.title.strip()
     return "Shared from PostBandit."
-    try:
-        return r2_client.get_presigned_download_url(clip.thumbnail_key)
-    except Exception as exc:
-        logger.warning("[exports] failed to derive thumbnail URL for clip_id=%s: %s", clip.id, exc)
-        return None
 
 
 def _to_response(
@@ -121,6 +122,7 @@ def _to_response(
         caption_style=export.caption_style,
         caption_color_variant=_resolve_caption_color_variant(export.caption_color_variant),
         caption_format=export.caption_format,
+        caption_cadence=export.caption_cadence,
         caption_vertical_position=export.caption_vertical_position,
         caption_scale=export.caption_scale,
         frame_anchor_x=export.frame_anchor_x,
@@ -255,6 +257,21 @@ async def delete_export(
             status_code=status.HTTP_409_CONFLICT,
             detail="Cannot delete an export while it is queued or rendering",
         )
+    active_publish_job = await db.scalar(
+        select(PublishJob.id)
+        .where(
+            PublishJob.export_id == export.id,
+            PublishJob.status.in_(
+                [PublishStatus.scheduled, PublishStatus.queued, PublishStatus.publishing]
+            ),
+        )
+        .limit(1)
+    )
+    if active_publish_job:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot delete an export with an active scheduled or publishing job",
+        )
 
     storage_keys: set[str] = set()
     if export.storage_key:
@@ -331,13 +348,14 @@ async def create_export(
     current_user: User = Depends(get_current_user),
 ):
     logger.info(
-        "[exports] create requested user_id=%s clip_id=%s aspect_ratio=%s caption_style=%s caption_color_variant=%s caption_format=%s caption_vertical_position=%s caption_scale=%s frame_anchor_x=%s frame_anchor_y=%s frame_zoom=%s overlay_image_asset_id=%s overlay_text=%s",
+        "[exports] create requested user_id=%s clip_id=%s aspect_ratio=%s caption_style=%s caption_color_variant=%s caption_format=%s caption_cadence=%s caption_vertical_position=%s caption_scale=%s frame_anchor_x=%s frame_anchor_y=%s frame_zoom=%s overlay_image_asset_id=%s overlay_text=%s",
         current_user.id,
         body.clip_id,
         body.aspect_ratio,
         body.caption_style,
         body.caption_color_variant,
         body.caption_format,
+        body.caption_cadence,
         body.caption_vertical_position,
         body.caption_scale,
         body.frame_anchor_x,
@@ -392,6 +410,7 @@ async def create_export(
             Export.aspect_ratio == body.aspect_ratio,
             Export.caption_style == body.caption_style,
             Export.caption_format == body.caption_format,
+            Export.caption_cadence == body.caption_cadence,
             Export.caption_scale == caption_scale,
             Export.frame_anchor_x == frame_anchor_x,
             Export.frame_anchor_y == frame_anchor_y,
@@ -443,6 +462,7 @@ async def create_export(
         caption_style=body.caption_style,
         caption_color_variant=caption_color_variant,
         caption_format=body.caption_format,
+        caption_cadence=body.caption_cadence,
         caption_vertical_position=caption_vertical_position,
         caption_scale=caption_scale,
         frame_anchor_x=frame_anchor_x,
@@ -466,6 +486,7 @@ async def create_export(
             "caption_style": _enum_value(body.caption_style) if body.caption_style else None,
             "caption_color_variant": _enum_value(caption_color_variant),
             "caption_format": _enum_value(body.caption_format),
+            "caption_cadence": _enum_value(body.caption_cadence),
             "caption_vertical_position": caption_vertical_position,
             "caption_scale": caption_scale,
             "frame_anchor_x": frame_anchor_x,
@@ -514,6 +535,7 @@ async def retry_export(
         caption_style=original_export.caption_style,
         caption_color_variant=_resolve_caption_color_variant(original_export.caption_color_variant),
         caption_format=original_export.caption_format,
+        caption_cadence=original_export.caption_cadence,
         caption_vertical_position=original_export.caption_vertical_position,
         caption_scale=original_export.caption_scale,
         frame_anchor_x=original_export.frame_anchor_x,
@@ -539,6 +561,7 @@ async def retry_export(
                 _resolve_caption_color_variant(retry_export_row.caption_color_variant)
             ),
             "caption_format": _enum_value(retry_export_row.caption_format),
+            "caption_cadence": _enum_value(retry_export_row.caption_cadence),
             "caption_vertical_position": retry_export_row.caption_vertical_position,
             "caption_scale": retry_export_row.caption_scale,
             "frame_anchor_x": retry_export_row.frame_anchor_x,

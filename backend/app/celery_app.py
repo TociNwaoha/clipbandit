@@ -50,6 +50,10 @@ beat_schedule["generate-daily-content"] = {
     "task": "generate_daily_content",
     "schedule": crontab(hour=8, minute=0),
 }
+beat_schedule["process-scheduled-publish-jobs"] = {
+    "task": "app.worker.tasks.publish.process_scheduled_publish_jobs",
+    "schedule": 60.0,
+}
 
 celery_app.conf.update(
     task_serializer="json",

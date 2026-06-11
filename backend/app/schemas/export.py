@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from app.models.export import (
     AspectRatio,
     CaptionColorVariant,
+    CaptionCadence,
     CaptionStyle,
     CaptionFormat,
     ExportStatus,
@@ -53,7 +54,8 @@ class ExportCreate(BaseModel):
     aspect_ratio: AspectRatio
     caption_style: CaptionStyle | None = None
     caption_color_variant: CaptionColorVariant | None = None
-    caption_format: CaptionFormat
+    caption_format: CaptionFormat = CaptionFormat.burned_in
+    caption_cadence: CaptionCadence = CaptionCadence.split_line
     caption_vertical_position: float | None = None
     caption_scale: float | None = None
     frame_anchor_x: float | None = None
@@ -79,6 +81,7 @@ class ExportResponse(BaseModel):
     caption_style: CaptionStyle | None
     caption_color_variant: CaptionColorVariant
     caption_format: CaptionFormat
+    caption_cadence: CaptionCadence
     caption_vertical_position: float | None = None
     caption_scale: float | None = None
     frame_anchor_x: float | None = None

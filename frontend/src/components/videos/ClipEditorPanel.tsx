@@ -22,6 +22,7 @@ import {
 } from "@/lib/captionPreview";
 import {
   AspectRatio,
+  CaptionCadence,
   CaptionColorVariant,
   CaptionFormat,
   CaptionStyle,
@@ -180,6 +181,7 @@ export function ClipEditorPanel({ video, initialClip, initialExports, initialSch
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle>("bold_boxed");
   const [captionColorVariant, setCaptionColorVariant] = useState<CaptionColorVariant>("classic");
   const [captionFormat, setCaptionFormat] = useState<CaptionFormat>("burned_in");
+  const [captionCadence, setCaptionCadence] = useState<CaptionCadence>("split_line");
   const [captionVerticalPosition, setCaptionVerticalPosition] = useState<number>(15);
   const [captionScale, setCaptionScale] = useState<number>(1);
   const [frameAnchorX, setFrameAnchorX] = useState<number>(0.5);
@@ -871,6 +873,7 @@ export function ClipEditorPanel({ video, initialClip, initialExports, initialSch
         caption_style: captionStyle,
         caption_color_variant: captionColorVariant,
         caption_format: captionFormat,
+        caption_cadence: captionCadence,
         caption_vertical_position: captionVerticalPosition,
         caption_scale: captionScale,
         frame_anchor_x: clampedFrameAnchorX,
@@ -1125,13 +1128,13 @@ export function ClipEditorPanel({ video, initialClip, initialExports, initialSch
                       </div>
                     </div>
                   </div>
-                ) : (
+                ) : captionFormat === "srt" ? (
                   <div className="pointer-events-none absolute inset-0 z-20 flex items-end justify-center p-4">
                     <p className="rounded-md bg-black/70 px-3 py-2 text-center text-xs text-white">
                       SRT mode: captions are exported as a sidecar file and are not burned into this preview.
                     </p>
                   </div>
-                )}
+                ) : null}
 
                 {overlayTextConfig.text.trim() ? (
                   <div
@@ -1164,7 +1167,11 @@ export function ClipEditorPanel({ video, initialClip, initialExports, initialSch
                 ) : null}
 
                 <div className="pointer-events-none absolute right-2 top-2 z-20 rounded-md bg-black/65 px-2 py-1 text-[11px] text-white">
-                  {captionFormat === "burned_in" ? "Burned-in caption preview" : "SRT style preview"}
+                  {captionFormat === "burned_in"
+                    ? "Burned-in caption preview"
+                    : captionFormat === "srt"
+                      ? "SRT sidecar"
+                      : "Captions disabled"}
                 </div>
               </div>
               <div className="mt-2 space-y-1 text-xs text-[var(--app-muted)]">
@@ -1621,7 +1628,7 @@ export function ClipEditorPanel({ video, initialClip, initialExports, initialSch
         <div className="mt-3 rounded-md border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-xs text-[var(--app-muted)]">
           Selected aspect from Framing: <span className="font-semibold text-[var(--app-text)]">{aspectRatio}</span>
         </div>
-        <div className="mt-4 grid gap-4 md:grid-cols-3">
+        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <label className="text-xs text-[var(--app-muted)]">
             Caption Style
             <select
@@ -1703,15 +1710,33 @@ export function ClipEditorPanel({ video, initialClip, initialExports, initialSch
             </div>
           </label>
           <label className="text-xs text-[var(--app-muted)]">
-            Caption Format
+            Caption Output
             <select
               value={captionFormat}
               onChange={(event) => setCaptionFormat(event.target.value as CaptionFormat)}
               className="mt-1 w-full rounded-md border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-sm text-[var(--app-text)] focus:border-[#1D3FD0] focus:outline-none"
             >
-              <option value="burned_in">burned_in</option>
-              <option value="srt">srt</option>
+              <option value="none">None</option>
+              <option value="burned_in">Burned In</option>
+              <option value="srt">SRT Sidecar</option>
             </select>
+          </label>
+          <label className="text-xs text-[var(--app-muted)]">
+            Caption Pacing
+            <select
+              value={captionCadence}
+              onChange={(event) => setCaptionCadence(event.target.value as CaptionCadence)}
+              disabled={captionFormat === "none"}
+              className="mt-1 w-full rounded-md border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-sm text-[var(--app-text)] focus:border-[#1D3FD0] focus:outline-none disabled:opacity-50"
+            >
+              <option value="split_line">Split Line</option>
+              <option value="word_by_word">Word by Word</option>
+              <option value="subtitle_block">Subtitle Block</option>
+              <option value="phrase">Existing Phrase</option>
+            </select>
+            <p className="mt-1 text-[11px] text-[var(--app-subtle)]">
+              Controls timing groups independently from visual style.
+            </p>
           </label>
         </div>
 
@@ -1755,7 +1780,8 @@ export function ClipEditorPanel({ video, initialClip, initialExports, initialSch
                     <p className="font-medium">Export {item.id.slice(0, 8)}</p>
                     <p className="mt-1 text-xs text-[var(--app-muted)]">
                       {item.aspect_ratio} • {formatCaptionStyleLabel(item.caption_style)} •{" "}
-                      {formatCaptionColorVariantLabel(item.caption_color_variant)} • {item.caption_format}
+                      {formatCaptionColorVariantLabel(item.caption_color_variant)} • {item.caption_format} •{" "}
+                      {item.caption_cadence}
                     </p>
                   </div>
                   <span

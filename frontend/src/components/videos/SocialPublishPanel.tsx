@@ -10,6 +10,7 @@ import {
   Clip,
   ConnectedAccount,
   Export,
+  PlatformCopyGenerateResponse,
   PublishJobStatus,
   SocialPlatform,
   SocialProvider,
@@ -62,12 +63,23 @@ const TIKTOK_PRIVACY_LABELS: Record<string, string> = {
 };
 
 const statusStyles: Record<PublishJobStatus, string> = {
+  scheduled: "bg-indigo-500/15 text-indigo-700",
   queued: "border border-[var(--app-border)] bg-[var(--app-surface-soft)] text-[var(--app-subtle)]",
   publishing: "bg-blue-500/20 text-blue-700 animate-pulse",
   published: "bg-emerald-500/20 text-emerald-700",
   failed: "bg-red-500/20 text-red-700",
   waiting_user_action: "bg-amber-500/20 text-amber-700",
   provider_not_configured: "bg-yellow-500/20 text-yellow-700",
+  cancelled: "bg-slate-500/15 text-slate-600",
+};
+const PLATFORM_COPY_LIMITS: Partial<Record<SocialPlatform, Partial<Record<"title" | "caption" | "description", number>>>> = {
+  instagram: { caption: 2200 },
+  threads: { caption: 500 },
+  facebook: { caption: 5000 },
+  youtube: { title: 100, description: 5000 },
+  x: { caption: 280 },
+  tiktok: { caption: 2200 },
+  linkedin: { caption: 3000 },
 };
 
 function emptyFields(): PublishFormFields {
@@ -170,13 +182,15 @@ function toIsoDatetime(value: string): string | null {
 }
 
 function toPayloadFields(fields: PublishFormFields) {
+  const scheduledFor = toIsoDatetime(fields.scheduled_for);
   return {
     caption: normalizeText(fields.caption),
     title: normalizeText(fields.title),
     description: normalizeText(fields.description),
     hashtags: parseHashtags(fields.hashtags),
     privacy: normalizeText(fields.privacy),
-    scheduled_for: toIsoDatetime(fields.scheduled_for),
+    scheduled_for: scheduledFor,
+    timezone: scheduledFor ? getBrowserTimeZone() : null,
   };
 }
 type PublishPayloadFields = ReturnType<typeof toPayloadFields>;
@@ -299,10 +313,16 @@ function formatScheduleLabel(value: string): string {
 
 function getBrowserTimeZone(): string {
   try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || "Local time";
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   } catch {
-    return "Local time";
+    return "UTC";
   }
+}
+
+function characterCounterClass(length: number, limit: number): string {
+  if (length >= limit) return "text-red-700";
+  if (length >= limit * 0.9) return "text-amber-700";
+  return "text-[var(--app-subtle)]";
 }
 
 interface SchedulePickerProps {
@@ -568,6 +588,7 @@ export function SocialPublishPanel({
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [generatingCopy, setGeneratingCopy] = useState(false);
+  const [generatingPlatformCopy, setGeneratingPlatformCopy] = useState(false);
   const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
   const [showUniversalEditor, setShowUniversalEditor] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -802,6 +823,55 @@ export function SocialPublishPanel({
     }
   };
 
+  const handleGeneratePlatformCopy = async () => {
+    const selectedPlatforms = PLATFORM_ORDER.filter((platform) => targetDrafts[platform]?.enabled);
+    if (!selectedPlatforms.length) {
+      setError("Select at least one connected platform before generating platform copy.");
+      return;
+    }
+
+    setGeneratingPlatformCopy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const generated = await api.post<PlatformCopyGenerateResponse>(
+        `/api/clips/${clip.id}/generate-platform-copy`,
+        { platforms: selectedPlatforms }
+      );
+      setTargetDrafts((previous) => {
+        const next = { ...previous };
+        for (const platform of selectedPlatforms) {
+          const copy = generated.results[platform];
+          if (!copy) continue;
+          const prior = previous[platform];
+          next[platform] = {
+            ...prior,
+            use_override: true,
+            override: {
+              ...prior.override,
+              title: copy.title ?? prior.override.title,
+              caption: copy.caption ?? prior.override.caption,
+              description: copy.description ?? prior.override.description,
+              hashtags: copy.hashtags.length ? copy.hashtags.join(" ") : prior.override.hashtags,
+            },
+          };
+        }
+        return next;
+      });
+      const generatedCount = Object.keys(generated.results).length;
+      const errorCount = Object.keys(generated.errors).length;
+      setMessage(
+        `Generated DeepSeek copy for ${generatedCount} platform(s)${
+          errorCount ? `; ${errorCount} platform(s) need manual copy` : ""
+        }.`
+      );
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Platform copy generation is unavailable right now.");
+    } finally {
+      setGeneratingPlatformCopy(false);
+    }
+  };
+
   const handleCreatePublishJobs = async () => {
     if (!selectedExportId) {
       setError("Select a ready export before publishing.");
@@ -858,6 +928,7 @@ export function SocialPublishPanel({
             hashtags: overridePayload?.hashtags ?? null,
             privacy: matchingOption.value,
             scheduled_for: overridePayload?.scheduled_for ?? null,
+            timezone: overridePayload?.timezone ?? null,
           };
         }
       } else if (overridePayload?.privacy) {
@@ -868,6 +939,7 @@ export function SocialPublishPanel({
           hashtags: overridePayload?.hashtags ?? null,
           privacy: null,
           scheduled_for: overridePayload?.scheduled_for ?? null,
+          timezone: overridePayload?.timezone ?? null,
         };
       }
 
@@ -916,7 +988,7 @@ export function SocialPublishPanel({
   };
 
   const anyScheduleCapableProvider = useMemo(
-    () => providers.some((provider) => provider.capabilities?.supports_schedule),
+    () => providers.some((provider) => provider.setup_status === "ready" && provider.capabilities?.supports_publish_now),
     [providers]
   );
 
@@ -1002,14 +1074,24 @@ export function SocialPublishPanel({
       <div className="rounded-md border border-[var(--app-border)] bg-[var(--app-surface-soft)] p-2.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">Universal Content</h4>
-          <button
-            type="button"
-            onClick={() => void handleGenerateCopy()}
-            disabled={generatingCopy}
-            className="rounded-md border border-[var(--app-border)] bg-white px-2.5 py-1 text-xs font-medium text-[var(--app-text)] hover:bg-[var(--app-surface)] disabled:opacity-60"
-          >
-            {generatingCopy ? "Generating..." : "Generate Copy"}
-          </button>
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={() => void handleGenerateCopy()}
+              disabled={generatingCopy}
+              className="rounded-md border border-[var(--app-border)] bg-white px-2.5 py-1 text-xs font-medium text-[var(--app-text)] hover:bg-[var(--app-surface)] disabled:opacity-60"
+            >
+              {generatingCopy ? "Generating..." : "Generate Universal Copy"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleGeneratePlatformCopy()}
+              disabled={generatingPlatformCopy}
+              className="rounded-md bg-[var(--app-primary)] px-2.5 py-1 text-xs font-medium text-white hover:bg-[var(--app-primary-hover)] disabled:opacity-60"
+            >
+              {generatingPlatformCopy ? "Generating..." : "Generate Platform Copy"}
+            </button>
+          </div>
         </div>
         <p className="mt-1 text-[11px] text-[var(--app-subtle)]">
           Universal fields apply unless a platform override is enabled.
@@ -1118,7 +1200,7 @@ export function SocialPublishPanel({
           const latestJob = latestJobsByPlatform.get(platform);
           const providerName = provider?.display_name || brand.displayName;
           const providerReady = provider?.setup_status === "ready";
-          const providerSupportsSchedule = Boolean(provider?.capabilities?.supports_schedule);
+          const providerSupportsSchedule = Boolean(providerReady && provider?.capabilities?.supports_publish_now);
           const hasConnectedAccounts = selectableAccounts.length > 0;
           const privacyOptions = privacyOptionsForTarget(platform, selectedAccount);
           const reconnectRequired = isReconnectRequiredXJob(latestJob);
@@ -1257,6 +1339,14 @@ export function SocialPublishPanel({
                       onChange={(event) => handleOverrideFieldChange(platform, "title", event.target.value)}
                       className="mt-1 w-full rounded-md border border-[var(--app-border)] bg-white px-2 py-1.5 text-xs text-[var(--app-text)] focus:border-[#1D3FD0] focus:outline-none"
                     />
+                    {PLATFORM_COPY_LIMITS[platform]?.title ? (
+                      <span className={`mt-0.5 block text-right text-[10px] ${characterCounterClass(
+                        draft.override.title.length,
+                        PLATFORM_COPY_LIMITS[platform]?.title as number
+                      )}`}>
+                        {draft.override.title.length}/{PLATFORM_COPY_LIMITS[platform]?.title}
+                      </span>
+                    ) : null}
                   </label>
                   <label className="text-xs text-[var(--app-muted)]">
                     Privacy
@@ -1307,6 +1397,14 @@ export function SocialPublishPanel({
                       rows={2}
                       className="mt-1 w-full rounded-md border border-[var(--app-border)] bg-white px-2 py-1.5 text-xs text-[var(--app-text)] focus:border-[#1D3FD0] focus:outline-none"
                     />
+                    {PLATFORM_COPY_LIMITS[platform]?.caption ? (
+                      <span className={`mt-0.5 block text-right text-[10px] ${characterCounterClass(
+                        draft.override.caption.length,
+                        PLATFORM_COPY_LIMITS[platform]?.caption as number
+                      )}`}>
+                        {draft.override.caption.length}/{PLATFORM_COPY_LIMITS[platform]?.caption}
+                      </span>
+                    ) : null}
                   </label>
                   <label className="text-xs text-[var(--app-muted)] md:col-span-2">
                     Description
@@ -1316,6 +1414,14 @@ export function SocialPublishPanel({
                       rows={2}
                       className="mt-1 w-full rounded-md border border-[var(--app-border)] bg-white px-2 py-1.5 text-xs text-[var(--app-text)] focus:border-[#1D3FD0] focus:outline-none"
                     />
+                    {PLATFORM_COPY_LIMITS[platform]?.description ? (
+                      <span className={`mt-0.5 block text-right text-[10px] ${characterCounterClass(
+                        draft.override.description.length,
+                        PLATFORM_COPY_LIMITS[platform]?.description as number
+                      )}`}>
+                        {draft.override.description.length}/{PLATFORM_COPY_LIMITS[platform]?.description}
+                      </span>
+                    ) : null}
                   </label>
                   <label className="text-xs text-[var(--app-muted)]">
                     Hashtags
@@ -1331,9 +1437,7 @@ export function SocialPublishPanel({
                       value={draft.override.scheduled_for}
                       onChange={(next) => handleOverrideFieldChange(platform, "scheduled_for", next)}
                       disabled={!providerSupportsSchedule}
-                      disabledReason={
-                        providerSupportsSchedule ? undefined : "Scheduling is not supported for this provider."
-                      }
+                      disabledReason={providerSupportsSchedule ? undefined : "Publishing is unavailable for this provider."}
                     />
                   </div>
                 </div>

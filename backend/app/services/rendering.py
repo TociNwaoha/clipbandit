@@ -61,7 +61,47 @@ def build_subtitle_cues(
     segments: Iterable[TranscriptSegment],
     clip_start: float,
     clip_end: float,
+    cadence: str = "phrase",
 ) -> list[SubtitleCue]:
+    cadence_value = getattr(cadence, "value", cadence)
+    if cadence_value not in {"phrase", "split_line", "word_by_word", "subtitle_block"}:
+        raise ValueError(f"Unsupported caption cadence: {cadence_value}")
+
+    clip_duration = max(0.0, float(clip_end) - float(clip_start))
+    normalized_segments: list[tuple[str, float, float]] = []
+    for segment in segments:
+        word = (segment.word or "").strip()
+        if not word:
+            continue
+        abs_start = max(float(segment.start_time), float(clip_start))
+        abs_end = min(float(segment.end_time), float(clip_end))
+        if abs_end <= abs_start:
+            continue
+        normalized_segments.append(
+            (
+                word,
+                max(0.0, abs_start - float(clip_start)),
+                min(clip_duration, abs_end - float(clip_start)),
+            )
+        )
+
+    if cadence_value == "word_by_word":
+        return [
+            SubtitleCue(
+                start=round(start, 3),
+                end=round(min(clip_duration, max(start + 0.08, end)), 3),
+                text=_normalize_text(word),
+            )
+            for word, start, end in normalized_segments
+            if _normalize_text(word)
+        ]
+
+    cadence_rules = {
+        "phrase": {"max_words": 8, "max_duration": 2.8, "max_gap": 0.6},
+        "split_line": {"max_words": 3, "max_duration": 1.5, "max_gap": 0.4},
+        "subtitle_block": {"max_words": 14, "max_duration": 4.8, "max_gap": 0.8},
+    }
+    rules = cadence_rules[cadence_value]
     cues: list[SubtitleCue] = []
     words: list[str] = []
     cue_start: float | None = None
@@ -76,36 +116,24 @@ def build_subtitle_cues(
             return
 
         start = max(cue_start, 0.0)
-        end = max(prev_end, start + 0.2)
+        end = min(clip_duration, max(prev_end, start + 0.2))
         text = _normalize_text(" ".join(words))
-        if text:
+        if text and end > start:
             cues.append(SubtitleCue(start=round(start, 3), end=round(end, 3), text=text))
 
         words = []
         cue_start = None
         prev_end = None
 
-    for segment in segments:
-        word = (segment.word or "").strip()
-        if not word:
-            continue
-
-        abs_start = max(float(segment.start_time), float(clip_start))
-        abs_end = min(float(segment.end_time), float(clip_end))
-        if abs_end <= abs_start:
-            continue
-
-        rel_start = abs_start - float(clip_start)
-        rel_end = abs_end - float(clip_start)
-
+    for word, rel_start, rel_end in normalized_segments:
         if cue_start is None:
             cue_start = rel_start
         else:
             gap = rel_start - (prev_end or rel_start)
             should_break = (
-                gap > 0.6
-                or len(words) >= 8
-                or (rel_end - cue_start) >= 2.8
+                gap > rules["max_gap"]
+                or len(words) >= rules["max_words"]
+                or (rel_end - cue_start) >= rules["max_duration"]
                 or _ends_sentence(words[-1] if words else "")
             )
             if should_break:
