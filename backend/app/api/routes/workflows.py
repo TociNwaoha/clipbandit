@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -43,6 +44,72 @@ ENABLED_SOURCE_PLATFORMS = {SocialPlatform.instagram, SocialPlatform.youtube, So
 def _destination_type(account: ConnectedAccount) -> str:
     metadata = account.metadata_json or {}
     return str(metadata.get("destination_type") or metadata.get("provider_destination_type") or account.platform.value)
+
+
+def _is_valid_workflow_source_account(account: ConnectedAccount, platform: SocialPlatform) -> bool:
+    if account.platform != platform:
+        return False
+    if platform == SocialPlatform.instagram:
+        return _destination_type(account) == "instagram_professional"
+    if platform == SocialPlatform.facebook:
+        return _destination_type(account) == "facebook_page"
+    if platform == SocialPlatform.youtube:
+        return account.platform == SocialPlatform.youtube
+    return False
+
+
+def _utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+async def _auto_repair_workflow_sources(db: AsyncSession, workflows: list[SocialWorkflow]) -> None:
+    changed = False
+    for workflow in workflows:
+        if workflow.source_account_id:
+            account = await db.scalar(
+                select(ConnectedAccount).where(
+                    ConnectedAccount.id == workflow.source_account_id,
+                    ConnectedAccount.user_id == workflow.user_id,
+                )
+            )
+            if (
+                account
+                and _is_valid_workflow_source_account(account, workflow.source_platform)
+                and workflow.last_error
+                and is_reconnect_required_source_error(workflow.last_error)
+            ):
+                account_updated_at = _utc(account.updated_at)
+                last_polled_at = _utc(workflow.last_polled_at)
+                if account_updated_at and (last_polled_at is None or account_updated_at > last_polled_at):
+                    workflow.last_error = None
+                    changed = True
+            continue
+
+        result = await db.execute(
+            select(ConnectedAccount)
+            .where(
+                ConnectedAccount.user_id == workflow.user_id,
+                ConnectedAccount.platform == workflow.source_platform,
+            )
+            .order_by(ConnectedAccount.updated_at.desc())
+        )
+        candidates = [
+            account
+            for account in result.scalars().all()
+            if _is_valid_workflow_source_account(account, workflow.source_platform)
+        ]
+        if len(candidates) == 1:
+            workflow.source_account_id = candidates[0].id
+            if workflow.last_error and is_reconnect_required_source_error(workflow.last_error):
+                workflow.last_error = None
+            changed = True
+
+    if changed:
+        await db.commit()
 
 
 async def _validate_source_account(
@@ -213,6 +280,7 @@ async def _workflow_responses(
     user_id: uuid.UUID,
     workflows: list[SocialWorkflow],
 ) -> list[SocialWorkflowResponse]:
+    await _auto_repair_workflow_sources(db, workflows)
     jobs_by_source = await _workflow_publish_jobs_by_source(db, user_id, workflows)
     return [
         SocialWorkflowResponse.model_validate(_workflow_response_payload(workflow, jobs_by_source))

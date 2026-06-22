@@ -341,6 +341,50 @@ def _source_account_error(platform: SocialPlatform) -> str:
     return f"Reconnect the {platform.value} source account."
 
 
+def _destination_type(account: ConnectedAccount) -> str:
+    metadata = account.metadata_json or {}
+    return str(metadata.get("destination_type") or metadata.get("provider_destination_type") or account.platform.value)
+
+
+def _is_valid_workflow_source_account(account: ConnectedAccount, platform: SocialPlatform) -> bool:
+    if account.platform != platform:
+        return False
+    if platform == SocialPlatform.instagram:
+        return _destination_type(account) == "instagram_professional"
+    if platform == SocialPlatform.facebook:
+        return _destination_type(account) == "facebook_page"
+    if platform == SocialPlatform.youtube:
+        return account.platform == SocialPlatform.youtube
+    return False
+
+
+def _resolve_workflow_source_account(db, workflow: SocialWorkflow) -> ConnectedAccount | None:
+    account = db.get(ConnectedAccount, workflow.source_account_id) if workflow.source_account_id else None
+    if account and _is_valid_workflow_source_account(account, workflow.source_platform):
+        return account
+
+    candidates = [
+        candidate
+        for candidate in db.execute(
+            select(ConnectedAccount)
+            .where(
+                ConnectedAccount.user_id == workflow.user_id,
+                ConnectedAccount.platform == workflow.source_platform,
+            )
+            .order_by(ConnectedAccount.updated_at.desc())
+        ).scalars()
+        if _is_valid_workflow_source_account(candidate, workflow.source_platform)
+    ]
+    if len(candidates) != 1:
+        return None
+
+    workflow.source_account_id = candidates[0].id
+    if workflow.last_error and is_reconnect_required_source_error(workflow.last_error):
+        workflow.last_error = None
+    db.flush()
+    return candidates[0]
+
+
 def is_reconnect_required_source_error(error: object) -> bool:
     normalized = str(error or "").lower()
     reconnect_markers = (
@@ -436,8 +480,8 @@ def poll_source_workflow(workflow_id: str) -> dict:
         if not workflow:
             return {"workflow_id": workflow_id, "created": 0, "enqueued": 0, "skipped": "inactive_or_locked"}
 
-        account = db.get(ConnectedAccount, workflow.source_account_id) if workflow.source_account_id else None
-        if not account or account.platform != workflow.source_platform:
+        account = _resolve_workflow_source_account(db, workflow)
+        if not account:
             workflow.last_error = _source_account_error(workflow.source_platform)
             workflow.last_polled_at = now
             db.commit()
