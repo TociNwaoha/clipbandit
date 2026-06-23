@@ -504,6 +504,7 @@ export interface FullVideoExportResponse {
 
 export type SocialWorkflowStatus = "active" | "paused";
 export type SocialWorkflowCopyMode = "reuse_source" | "platform_ai" | "both";
+export type SocialWorkflowImportMode = "manual_select" | "start_now" | "last_n";
 export type SocialWorkflowRunStatus =
   | "detected"
   | "importing"

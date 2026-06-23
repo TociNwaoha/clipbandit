@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 from pydantic import BaseModel, Field
 
 from app.models.connected_account import SocialPlatform
@@ -20,6 +21,8 @@ class SocialWorkflowCreateRequest(BaseModel):
     source_account_id: uuid.UUID
     copy_mode: SocialWorkflowCopyMode = SocialWorkflowCopyMode.both
     auto_publish: bool = True
+    source_import_mode: Literal["manual_select", "start_now", "last_n"] = "manual_select"
+    source_backfill_limit: int | None = Field(default=3, ge=1, le=10)
     destinations: list[SocialWorkflowDestinationInput] = Field(min_length=1, max_length=12)
 
 
@@ -33,6 +36,19 @@ class SocialWorkflowPatchRequest(BaseModel):
 
 class SocialWorkflowAttachExportRequest(BaseModel):
     export_id: uuid.UUID
+
+
+class SocialWorkflowStartSourcePostRequest(BaseModel):
+    destinations: list[SocialWorkflowDestinationInput] | None = Field(default=None, min_length=1, max_length=12)
+
+
+class SocialWorkflowStartSourcePostResponse(BaseModel):
+    source_post_id: uuid.UUID
+    status: SocialWorkflowSourceStatus
+    import_task_id: str | None = None
+    publish_job_ids: list[str] = Field(default_factory=list)
+    publish_task_ids: list[str] = Field(default_factory=list)
+    skipped: str | None = None
 
 
 class SocialWorkflowRunResponse(BaseModel):

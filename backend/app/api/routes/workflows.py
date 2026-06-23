@@ -28,11 +28,14 @@ from app.schemas.social_workflow import (
     SocialWorkflowPatchRequest,
     SocialWorkflowPollResponse,
     SocialWorkflowResponse,
+    SocialWorkflowStartSourcePostRequest,
+    SocialWorkflowStartSourcePostResponse,
 )
 from app.schemas.social import PublishJobResponse
 from app.services.workflows.official_sources import (
     is_reconnect_required_source_error,
     reconnect_required_source_message,
+    start_source_post_workflow,
 )
 
 router = APIRouter(prefix="/social/workflows", tags=["social-workflows"])
@@ -319,7 +322,10 @@ async def create_workflow(
         copy_mode=body.copy_mode,
         auto_publish=body.auto_publish,
         destination_targets_json=destinations,
-        poll_cursor_json={},
+        poll_cursor_json={
+            "source_import_mode": body.source_import_mode,
+            "source_backfill_limit": body.source_backfill_limit if body.source_import_mode == "last_n" else None,
+        },
     )
     db.add(workflow)
     await db.commit()
@@ -420,4 +426,38 @@ async def attach_export_to_source_post(
         source_post_id=source_post.id,
         export_id=export.id,
         status=source_post.status,
+    )
+
+
+@router.post("/source-posts/{source_post_id}/start", response_model=SocialWorkflowStartSourcePostResponse)
+async def start_source_post(
+    source_post_id: uuid.UUID,
+    body: SocialWorkflowStartSourcePostRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    source_post = await db.scalar(
+        select(SocialWorkflowSourcePost).where(
+            SocialWorkflowSourcePost.id == source_post_id,
+            SocialWorkflowSourcePost.user_id == current_user.id,
+        )
+    )
+    if not source_post:
+        raise HTTPException(status_code=404, detail="Workflow source post not found")
+
+    destinations = None
+    if body.destinations is not None:
+        destinations = await _validate_destinations(db, current_user.id, body.destinations)
+
+    result = start_source_post_workflow(str(source_post.id), destinations)
+    status_value = result.get("status")
+    if status_value == "missing":
+        raise HTTPException(status_code=404, detail="Workflow source post not found")
+    return SocialWorkflowStartSourcePostResponse(
+        source_post_id=source_post.id,
+        status=SocialWorkflowSourceStatus(str(status_value)),
+        import_task_id=result.get("import_task_id"),
+        publish_job_ids=result.get("publish_job_ids") or [],
+        publish_task_ids=result.get("publish_task_ids") or [],
+        skipped=result.get("skipped"),
     )

@@ -7,7 +7,15 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { api, ApiError } from "@/lib/api";
-import { ConnectedAccount, Export, SocialPlatform, SocialPublishJob, SocialWorkflow, SocialWorkflowSourcePost } from "@/types";
+import {
+  ConnectedAccount,
+  Export,
+  SocialPlatform,
+  SocialPublishJob,
+  SocialWorkflow,
+  SocialWorkflowImportMode,
+  SocialWorkflowSourcePost,
+} from "@/types";
 
 const DESTINATION_PLATFORMS: SocialPlatform[] = ["instagram", "threads", "facebook", "youtube", "x", "tiktok"];
 const SOURCE_PLATFORMS: SocialPlatform[] = ["instagram", "youtube", "facebook"];
@@ -116,6 +124,28 @@ function workflowSourceMessage(workflow: SocialWorkflow): string | null {
   return null;
 }
 
+function workflowImportMode(workflow: SocialWorkflow): SocialWorkflowImportMode {
+  const value = workflow.poll_cursor_json?.source_import_mode;
+  if (value === "start_now" || value === "last_n" || value === "manual_select") return value;
+  return "manual_select";
+}
+
+function workflowDestinationIds(workflow: SocialWorkflow): string[] {
+  return workflow.destination_targets_json
+    .map((target) => target.connected_account_id)
+    .filter((value): value is string => typeof value === "string" && value.length > 0);
+}
+
+function canStartSourcePost(post: SocialWorkflowSourcePost): boolean {
+  return ["detected", "import_failed", "ready_to_publish"].includes(post.status);
+}
+
+function startButtonLabel(post: SocialWorkflowSourcePost): string {
+  if (post.status === "ready_to_publish") return "Publish now";
+  if (post.status === "import_failed") return "Retry import";
+  return "Import / publish";
+}
+
 export function SocialWorkflowsPanel() {
   const [accounts, setAccounts] = useState<ConnectedAccount[]>([]);
   const [workflows, setWorkflows] = useState<SocialWorkflow[]>([]);
@@ -123,12 +153,16 @@ export function SocialWorkflowsPanel() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [attachingPostId, setAttachingPostId] = useState<string | null>(null);
+  const [startingPostId, setStartingPostId] = useState<string | null>(null);
   const [selectedExportByPost, setSelectedExportByPost] = useState<Record<string, string>>({});
+  const [selectedDestinationIdsByPost, setSelectedDestinationIdsByPost] = useState<Record<string, string[]>>({});
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("Social repurpose workflow");
   const [sourcePlatform, setSourcePlatform] = useState<SocialPlatform>("instagram");
   const [sourceAccountId, setSourceAccountId] = useState("");
   const [copyMode, setCopyMode] = useState<"reuse_source" | "platform_ai" | "both">("both");
+  const [sourceImportMode, setSourceImportMode] = useState<SocialWorkflowImportMode>("manual_select");
+  const [sourceBackfillLimit, setSourceBackfillLimit] = useState(3);
   const [selectedDestinationIds, setSelectedDestinationIds] = useState<Set<string>>(new Set());
 
   const load = async () => {
@@ -196,6 +230,8 @@ export function SocialWorkflowsPanel() {
         source_account_id: sourceAccountId,
         copy_mode: copyMode,
         auto_publish: true,
+        source_import_mode: sourceImportMode,
+        source_backfill_limit: sourceImportMode === "last_n" ? sourceBackfillLimit : null,
         destinations,
       });
       setSelectedDestinationIds(new Set());
@@ -244,6 +280,37 @@ export function SocialWorkflowsPanel() {
       setError(err instanceof ApiError ? err.message : "Failed to attach export");
     } finally {
       setAttachingPostId(null);
+    }
+  };
+
+  const selectedDestinationsForPost = (workflow: SocialWorkflow, postId: string): string[] => {
+    return selectedDestinationIdsByPost[postId] || workflowDestinationIds(workflow);
+  };
+
+  const togglePostDestination = (workflow: SocialWorkflow, postId: string, accountId: string) => {
+    const current = selectedDestinationsForPost(workflow, postId);
+    const next = current.includes(accountId) ? current.filter((id) => id !== accountId) : [...current, accountId];
+    setSelectedDestinationIdsByPost((state) => ({ ...state, [postId]: next }));
+  };
+
+  const startSourcePost = async (workflow: SocialWorkflow, post: SocialWorkflowSourcePost) => {
+    const selectedIds = selectedDestinationsForPost(workflow, post.id);
+    const destinations = destinationAccounts
+      .filter((account) => selectedIds.includes(account.id))
+      .map((account) => ({ platform: account.platform, connected_account_id: account.id }));
+    if (!destinations.length) {
+      setError("Select at least one destination for this source post.");
+      return;
+    }
+    setStartingPostId(post.id);
+    setError(null);
+    try {
+      await api.post(`/api/social/workflows/source-posts/${post.id}/start`, { destinations });
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to start source post workflow");
+    } finally {
+      setStartingPostId(null);
     }
   };
 
@@ -321,6 +388,68 @@ export function SocialWorkflowsPanel() {
           </label>
         </div>
 
+        <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] p-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-[var(--app-text)]">When source posts are found</p>
+              <p className="mt-1 text-xs text-[var(--app-muted)]">
+                Default is safest: detect posts first, then let the user choose which ones to import and publish.
+              </p>
+            </div>
+            {sourceImportMode === "last_n" ? (
+              <label className="flex items-center gap-2 text-xs font-medium text-[var(--app-muted)]">
+                Import last
+                <select
+                  value={sourceBackfillLimit}
+                  onChange={(event) => setSourceBackfillLimit(Number(event.target.value))}
+                  className="rounded-lg border border-[var(--app-border)] bg-white px-2 py-1 text-[var(--app-text)] outline-none"
+                >
+                  {[1, 3, 5, 10].map((count) => (
+                    <option key={count} value={count}>
+                      {count}
+                    </option>
+                  ))}
+                </select>
+                post(s)
+              </label>
+            ) : null}
+          </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-3">
+            {[
+              {
+                value: "manual_select",
+                title: "Show source posts first",
+                description: "Detect posts only. User clicks Import / publish per post.",
+              },
+              {
+                value: "start_now",
+                title: "Start from now",
+                description: "Ignore old posts. Auto-process future posts only.",
+              },
+              {
+                value: "last_n",
+                title: "Import last N posts",
+                description: "Process a small backfill now, then future posts.",
+              },
+            ].map((option) => {
+              const selected = sourceImportMode === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setSourceImportMode(option.value as SocialWorkflowImportMode)}
+                  className={`rounded-xl border px-3 py-2 text-left transition ${
+                    selected ? "border-[var(--app-primary)] bg-white shadow-sm" : "border-[var(--app-border)] bg-white/60 hover:bg-white"
+                  }`}
+                >
+                  <span className="block text-sm font-semibold text-[var(--app-text)]">{option.title}</span>
+                  <span className="mt-1 block text-xs text-[var(--app-muted)]">{option.description}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         <p className="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] px-3 py-2 text-xs text-[var(--app-muted)]">
           {sourceHelpText(sourcePlatform)}
         </p>
@@ -360,7 +489,8 @@ export function SocialWorkflowsPanel() {
 
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs text-[var(--app-muted)]">
-            Auto-publish is enabled. If the source API does not provide a reusable video URL, the run will be marked Original file required.
+            Auto-publish runs only after a source post is selected/imported. If the source API does not provide a reusable video URL,
+            the run will be marked Original file required.
           </p>
           <Button onClick={() => void createWorkflow()} disabled={saving}>
             {saving ? "Saving..." : "Create Workflow"}
@@ -397,6 +527,9 @@ export function SocialWorkflowsPanel() {
                   </div>
                   <p className="text-sm text-[var(--app-muted)]">
                     {sourceBrand.displayName} source · {workflow.destination_targets_json.length} destination(s) · {statusLabel(workflow.copy_mode)}
+                  </p>
+                  <p className="mt-1 text-xs text-[var(--app-subtle)]">
+                    Intake: {statusLabel(workflowImportMode(workflow))}
                   </p>
                   <div className="mt-2 flex flex-wrap gap-2 text-xs text-[var(--app-muted)]">
                     <span className="rounded-full bg-[var(--app-surface-soft)] px-2 py-1">
@@ -526,6 +659,49 @@ export function SocialWorkflowsPanel() {
                                 </span>
                               ) : null}
                             </div>
+
+                            {canStartSourcePost(post) ? (
+                              <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-soft)] p-3">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <div>
+                                    <p className="text-xs font-semibold text-[var(--app-text)]">Publish this source post</p>
+                                    <p className="mt-0.5 text-xs text-[var(--app-muted)]">
+                                      Choose destinations, then start import/processing or publish if the export is ready.
+                                    </p>
+                                  </div>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => void startSourcePost(workflow, post)}
+                                    disabled={startingPostId === post.id}
+                                  >
+                                    {startingPostId === post.id ? "Starting..." : startButtonLabel(post)}
+                                  </Button>
+                                </div>
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  {destinationAccounts.map((account) => {
+                                    const brand = getPlatformBrandMeta(account.platform);
+                                    const selected = selectedDestinationsForPost(workflow, post.id).includes(account.id);
+                                    return (
+                                      <button
+                                        key={account.id}
+                                        type="button"
+                                        onClick={() => togglePostDestination(workflow, post.id, account.id)}
+                                        className={`flex items-center gap-2 rounded-lg border px-2 py-1.5 text-xs transition ${
+                                          selected
+                                            ? "border-[var(--app-primary)] bg-white text-[var(--app-text)]"
+                                            : "border-[var(--app-border)] bg-white/60 text-[var(--app-muted)] hover:bg-white"
+                                        }`}
+                                      >
+                                        <span className={`flex h-5 w-5 items-center justify-center rounded ${brand.badgeClassName}`}>
+                                          {brand.icon}
+                                        </span>
+                                        <span className="max-w-[130px] truncate">{brand.displayName}</span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            ) : null}
 
                             {post.status === "original_required" ? (
                               <div className="rounded-xl border border-orange-200 bg-orange-50 p-3">

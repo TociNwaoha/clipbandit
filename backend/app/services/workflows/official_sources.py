@@ -465,6 +465,23 @@ def _sync_status(source_post: SocialWorkflowSourcePost, status: SocialWorkflowSo
         source_post.workflow_run.error_message = source_post.error_message
 
 
+def _workflow_intake_settings(workflow: SocialWorkflow) -> tuple[str, int | None, bool]:
+    cursor = workflow.poll_cursor_json or {}
+    mode = str(cursor.get("source_import_mode") or "manual_select")
+    if mode not in {"manual_select", "start_now", "last_n"}:
+        mode = "manual_select"
+    limit = cursor.get("source_backfill_limit")
+    try:
+        backfill_limit = int(limit) if limit is not None else None
+    except (TypeError, ValueError):
+        backfill_limit = None
+    if backfill_limit is not None:
+        backfill_limit = max(1, min(backfill_limit, 10))
+    elif mode == "last_n":
+        backfill_limit = 3
+    return mode, backfill_limit, mode != "manual_select"
+
+
 def poll_source_workflow(workflow_id: str) -> dict:
     workflow_uuid = uuid.UUID(workflow_id)
     created = 0
@@ -509,9 +526,19 @@ def poll_source_workflow(workflow_id: str) -> dict:
                 SocialWorkflowSourcePost.workflow_id == workflow.id,
             )
         ).scalar_one()
-        # First empty workflow scan backfills the latest official API results.
-        # Later scans only watch posts from workflow creation forward.
-        watch_started_at = None if existing_source_count == 0 else workflow.created_at
+        intake_mode, backfill_limit, auto_import_detected = _workflow_intake_settings(workflow)
+        initial_scan = existing_source_count == 0
+        # manual_select: first scan detects existing posts without importing them.
+        # start_now: only future posts are detected/imported.
+        # last_n: first scan imports the latest N posts; later scans import future posts.
+        if intake_mode == "start_now":
+            watch_started_at = workflow.created_at
+        elif intake_mode == "last_n" and initial_scan:
+            watch_started_at = None
+        elif intake_mode == "manual_select" and initial_scan:
+            watch_started_at = None
+        else:
+            watch_started_at = workflow.created_at
         if watch_started_at and watch_started_at.tzinfo is None:
             watch_started_at = watch_started_at.replace(tzinfo=timezone.utc)
         elif watch_started_at:
@@ -555,25 +582,28 @@ def poll_source_workflow(workflow_id: str) -> dict:
             db.flush()
             created += 1
             new_source_ids.append(str(source_post.id))
+            if intake_mode == "last_n" and initial_scan and backfill_limit and created >= backfill_limit:
+                break
 
-        # Redispatch existing detected posts as well as brand-new detections.
-        # This makes Poll Now self-healing if a previous deploy created ledger
-        # rows but lost the import task before workers could claim them.
-        detected_source_ids = db.execute(
-            select(SocialWorkflowSourcePost.id)
-            .where(
-                SocialWorkflowSourcePost.workflow_id == workflow.id,
-                SocialWorkflowSourcePost.status == SocialWorkflowSourceStatus.detected,
-            )
-            .order_by(SocialWorkflowSourcePost.created_at.asc())
-            .limit(50)
-        ).scalars().all()
-        seen_source_ids: set[str] = set()
-        for source_id in [*new_source_ids, *[str(source_id) for source_id in detected_source_ids]]:
-            if source_id in seen_source_ids:
-                continue
-            seen_source_ids.add(source_id)
-            dispatch_source_ids.append(source_id)
+        if auto_import_detected:
+            # Redispatch existing detected posts as well as brand-new detections.
+            # This makes Poll Now self-healing if a previous deploy created ledger
+            # rows but lost the import task before workers could claim them.
+            detected_source_ids = db.execute(
+                select(SocialWorkflowSourcePost.id)
+                .where(
+                    SocialWorkflowSourcePost.workflow_id == workflow.id,
+                    SocialWorkflowSourcePost.status == SocialWorkflowSourceStatus.detected,
+                )
+                .order_by(SocialWorkflowSourcePost.created_at.asc())
+                .limit(50)
+            ).scalars().all()
+            seen_source_ids: set[str] = set()
+            for source_id in [*new_source_ids, *[str(source_id) for source_id in detected_source_ids]]:
+                if source_id in seen_source_ids:
+                    continue
+                seen_source_ids.add(source_id)
+                dispatch_source_ids.append(source_id)
 
         workflow.last_polled_at = now
         workflow.last_error = None
@@ -893,11 +923,19 @@ def _copy_for_destinations(source_post: SocialWorkflowSourcePost, workflow: Soci
     return merged
 
 
+def _source_post_destination_targets(source_post: SocialWorkflowSourcePost, workflow: SocialWorkflow) -> list[dict]:
+    metadata = source_post.raw_metadata_json or {}
+    override = metadata.get("workflow_destination_targets_override")
+    if isinstance(override, list) and override:
+        return [target for target in override if isinstance(target, dict)]
+    return workflow.destination_targets_json or []
+
+
 def _create_publish_jobs(db, source_post: SocialWorkflowSourcePost, workflow: SocialWorkflow, export: Export) -> list[str]:
     clip = db.get(Clip, export.clip_id)
     if not clip:
         raise RuntimeError("Workflow export clip is missing")
-    targets = workflow.destination_targets_json or []
+    targets = _source_post_destination_targets(source_post, workflow)
     platforms = [str(target.get("platform")) for target in targets if target.get("platform")]
     copy_by_platform = _copy_for_destinations(source_post, workflow, clip, platforms)
     created_job_ids: list[str] = []
@@ -951,6 +989,105 @@ def _create_publish_jobs(db, source_post: SocialWorkflowSourcePost, workflow: So
         db.flush()
         created_job_ids.append(str(job.id))
     return created_job_ids
+
+
+def start_source_post_workflow(source_post_id: str, destination_targets: list[dict] | None = None) -> dict:
+    source_uuid = uuid.UUID(source_post_id)
+    import_task_id = None
+    publish_task_ids: list[str] = []
+    job_ids: list[str] = []
+
+    with SyncSessionLocal() as db:
+        source_post = db.execute(
+            select(SocialWorkflowSourcePost)
+            .where(SocialWorkflowSourcePost.id == source_uuid)
+            .with_for_update(skip_locked=True)
+        ).scalar_one_or_none()
+        if not source_post:
+            return {"source_post_id": source_post_id, "status": "missing"}
+        workflow = db.get(SocialWorkflow, source_post.workflow_id)
+        if not workflow:
+            _sync_status(source_post, SocialWorkflowSourceStatus.import_failed, "Workflow no longer exists")
+            db.commit()
+            return {"source_post_id": source_post_id, "status": "import_failed", "error": "Workflow no longer exists"}
+
+        if destination_targets is not None:
+            metadata = dict(source_post.raw_metadata_json or {})
+            metadata["workflow_destination_targets_override"] = destination_targets
+            source_post.raw_metadata_json = metadata
+
+        if source_post.status in {SocialWorkflowSourceStatus.detected, SocialWorkflowSourceStatus.import_failed}:
+            _sync_status(source_post, SocialWorkflowSourceStatus.detected)
+            db.commit()
+            from app.worker.tasks.social_workflows import import_source_post_media
+
+            task = import_source_post_media.apply_async(args=[source_post_id], queue="ingest")
+            import_task_id = task.id
+            return {
+                "source_post_id": source_post_id,
+                "status": SocialWorkflowSourceStatus.detected.value,
+                "import_task_id": import_task_id,
+                "publish_job_ids": [],
+                "publish_task_ids": [],
+            }
+
+        if source_post.status == SocialWorkflowSourceStatus.imported_processing:
+            db.commit()
+            return {
+                "source_post_id": source_post_id,
+                "status": source_post.status.value,
+                "import_task_id": None,
+                "publish_job_ids": [],
+                "publish_task_ids": [],
+            }
+
+        if source_post.status != SocialWorkflowSourceStatus.ready_to_publish:
+            db.commit()
+            return {
+                "source_post_id": source_post_id,
+                "status": source_post.status.value,
+                "import_task_id": None,
+                "publish_job_ids": [],
+                "publish_task_ids": [],
+                "skipped": "not_ready_to_start",
+            }
+
+        export = db.get(Export, source_post.export_id) if source_post.export_id else None
+        if not export:
+            _sync_status(source_post, SocialWorkflowSourceStatus.import_failed, "Workflow export is missing")
+            db.commit()
+            return {"source_post_id": source_post_id, "status": "import_failed", "error": "Workflow export is missing"}
+        if export.status != ExportStatus.ready:
+            db.commit()
+            return {
+                "source_post_id": source_post_id,
+                "status": source_post.status.value,
+                "import_task_id": None,
+                "publish_job_ids": [],
+                "publish_task_ids": [],
+                "skipped": "export_not_ready",
+            }
+
+        job_ids = _create_publish_jobs(db, source_post, workflow, export)
+        _sync_status(source_post, SocialWorkflowSourceStatus.publishing)
+        if source_post.workflow_run:
+            source_post.workflow_run.publish_job_ids_json = job_ids
+        db.commit()
+
+    if job_ids:
+        from app.worker.tasks.publish import execute_publish_job
+
+        for job_id in job_ids:
+            task = execute_publish_job.apply_async(args=[job_id], queue="publish")
+            publish_task_ids.append(task.id)
+
+    return {
+        "source_post_id": source_post_id,
+        "status": SocialWorkflowSourceStatus.publishing.value,
+        "import_task_id": import_task_id,
+        "publish_job_ids": job_ids,
+        "publish_task_ids": publish_task_ids,
+    }
 
 
 def continue_ready_official_source_workflows() -> dict:
