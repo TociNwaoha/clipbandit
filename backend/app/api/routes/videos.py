@@ -52,7 +52,7 @@ from app.schemas.youtube_import import (
     VideoManualUploadConfirmResponse,
     VideoManualUploadUrlResponse,
 )
-from app.services.r2 import r2_client
+from app.services.object_storage import object_storage_client
 from app.services.editor_preview import (
     mark_editor_preview_failed,
     mark_editor_preview_pending,
@@ -313,7 +313,7 @@ async def _finalize_manual_upload_transition(
     reason_code: str = "manual_upload_confirmed",
     actor: str = "api",
 ) -> None:
-    if not storage_key or not r2_client.file_exists(storage_key):
+    if not storage_key or not object_storage_client.file_exists(storage_key):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file not found in storage")
 
     video.storage_key = storage_key
@@ -445,7 +445,7 @@ async def create_upload_url(
     storage_key = f"uploads/{video.id}/original{ext}"
     video.storage_key = storage_key
 
-    signed = r2_client.get_presigned_upload_url(storage_key, expiry=900)
+    signed = object_storage_client.get_presigned_upload_url(storage_key, expiry=900)
     return VideoUploadUrlResponse(
         video_id=video.id,
         upload_url=signed["url"],
@@ -474,7 +474,7 @@ async def confirm_upload(
             video.status.value,
         )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Video is not in queued state")
-    if not video.storage_key or not r2_client.file_exists(video.storage_key):
+    if not video.storage_key or not object_storage_client.file_exists(video.storage_key):
         logger.warning(
             "[upload_confirm_failed] video_id=%s reason=uploaded_file_missing storage_key=%s",
             video.id,
@@ -805,7 +805,7 @@ async def list_videos(
 
     for video_id, thumbnail_key in thumbnail_keys_by_video_id.items():
         try:
-            thumbnail_urls_by_video_id[video_id] = r2_client.get_presigned_download_url(thumbnail_key)
+            thumbnail_urls_by_video_id[video_id] = object_storage_client.get_presigned_download_url(thumbnail_key)
         except Exception as exc:
             logger.warning(
                 "[videos] failed to generate dashboard thumbnail URL for video_id=%s key=%s: %s",
@@ -1058,7 +1058,7 @@ async def manual_upload_url(
         )
     await db.commit()
 
-    signed = r2_client.get_presigned_upload_url(storage_key, expiry=900)
+    signed = object_storage_client.get_presigned_upload_url(storage_key, expiry=900)
     return VideoManualUploadUrlResponse(
         video_id=video.id,
         upload_url=signed["url"],
@@ -1137,7 +1137,7 @@ async def create_local_helper_session(
 
     ttl_seconds = max(60, int(settings.youtube_local_helper_ttl_minutes) * 60)
     upload_key = f"uploads/{video.id}/local-helper-{secrets.token_hex(6)}.mp4"
-    signed = r2_client.get_presigned_upload_url(upload_key, expiry=ttl_seconds)
+    signed = object_storage_client.get_presigned_upload_url(upload_key, expiry=ttl_seconds)
 
     try:
         helper_session = await create_local_helper_token_session(
@@ -1245,7 +1245,7 @@ async def get_video(
     source_download_url: str | None = None
     if video.storage_key:
         try:
-            source_download_url = r2_client.get_presigned_download_url(video.storage_key)
+            source_download_url = object_storage_client.get_presigned_download_url(video.storage_key)
         except Exception as exc:
             logger.warning("[videos] failed to generate source download URL for video_id=%s: %s", video.id, exc)
 
@@ -1259,7 +1259,7 @@ async def get_video(
     )
     if preview_key:
         try:
-            editor_preview_download_url = r2_client.get_presigned_download_url(preview_key)
+            editor_preview_download_url = object_storage_client.get_presigned_download_url(preview_key)
             if preview_status != "ready":
                 preview_status = "ready"
         except Exception as exc:
@@ -1321,7 +1321,7 @@ async def get_video_transcript(
 
     transcript_key = f"transcripts/{video.id}/transcript.json"
     try:
-        transcript_text = r2_client.read_text_file(transcript_key)
+        transcript_text = object_storage_client.read_text_file(transcript_key)
     except FileNotFoundError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transcript file not found")
     except Exception:
@@ -1424,7 +1424,7 @@ async def delete_video(
 
     for key in storage_keys:
         try:
-            r2_client.delete_file(key)
+            object_storage_client.delete_file(key)
         except Exception as exc:
             logger.warning("Best-effort delete failed for %s: %s", key, exc)
 

@@ -33,13 +33,12 @@ class Settings(BaseSettings):
     backend_public_url: str = "http://localhost:8000"
     frontend_public_url: str = "http://localhost:3001"
 
-    # Cloudflare R2
-    r2_account_id: str = "placeholder"
-    r2_access_key_id: str = "placeholder"
-    r2_secret_access_key: str = "placeholder"
-    r2_bucket_name: str = "clipbandit"
-    r2_endpoint_url: str = "https://placeholder.r2.cloudflarestorage.com"
-    r2_public_url: str = "placeholder"
+    # Backblaze B2 (S3-compatible API)
+    b2_key_id: str = "placeholder"
+    b2_application_key: str = "placeholder"
+    b2_bucket_name: str = "placeholder"
+    b2_endpoint_url: str = "https://placeholder.backblazeb2.com"
+    b2_region: str = "placeholder"
 
     # Anthropic (legacy)
     anthropic_api_key: str = "placeholder"

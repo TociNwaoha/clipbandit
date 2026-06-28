@@ -53,7 +53,7 @@ from app.services.social.oauth_state import (
 from app.services.social import all_adapters, get_adapter
 from app.services.social.base import ProviderNotConfiguredError, ProviderOperationError
 from app.services.social.x import build_pkce_challenge, generate_pkce_verifier
-from app.services.r2 import r2_client
+from app.services.object_storage import object_storage_client
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -921,7 +921,7 @@ async def list_publish_calendar(
         thumbnail_url = None
         if clip and clip.thumbnail_key:
             try:
-                thumbnail_url = r2_client.get_presigned_download_url(clip.thumbnail_key)
+                thumbnail_url = object_storage_client.get_presigned_download_url(clip.thumbnail_key)
             except Exception as exc:
                 logger.warning(
                     "[social] calendar thumbnail unavailable job_id=%s error=%s",

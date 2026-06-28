@@ -14,7 +14,7 @@ from app.database import SyncSessionLocal
 from app.models.job import Job, JobStatus
 from app.models.video import Video, VideoImportMode, VideoImportState, VideoSourceType, VideoStatus
 from app.models.youtube_playlist_import import YoutubePlaylistImport
-from app.services.r2 import r2_client
+from app.services.object_storage import object_storage_client
 from app.services.youtube import (
     classify_yt_dlp_error,
     embed_url_for_video_id,
@@ -269,7 +269,7 @@ def ingest_job(self, video_id: str):
         local_video = preferred[0] if preferred else download_candidates[0]
 
         storage_key = f"uploads/{video_id}/original.mp4"
-        r2_client.upload_file(str(local_video), storage_key)
+        object_storage_client.upload_file(str(local_video), storage_key)
 
         with SyncSessionLocal() as db:
             video = db.execute(select(Video).where(Video.id == video_uuid)).scalars().first()

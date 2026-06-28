@@ -27,10 +27,12 @@ from app.models.transcript import TranscriptSegment
 from app.models.video import Video, VideoImportMode, VideoImportState, VideoSourceType, VideoStatus
 from app.services.ai_copy import AICopyError, AICopyUnavailableError, generate_platform_copy, provider_configured
 from app.services.crypto import decrypt_secret, encrypt_secret
-from app.services.r2 import r2_client
+from app.services.ffmpeg import extract_thumbnail
+from app.services.object_storage import object_storage_client
 from app.services.social.instagram import ensure_instagram_account_token
 from app.services.social.meta import GraphRequestError, graph_get
 from app.services.social.security import redact_url, sanitize_sensitive_text
+from app.services.storage import clip_thumbnail_key
 
 logger = logging.getLogger(__name__)
 
@@ -742,7 +744,7 @@ def import_source_post(source_post_id: str) -> dict:
                 return {"source_post_id": source_post_id, "status": "missing"}
             video_id = uuid.uuid4()
             storage_key = f"videos/{source_post.user_id}/{video_id}/source/{platform.value}.mp4"
-            r2_client.upload_file(str(tmp_media), storage_key)
+            object_storage_client.upload_file(str(tmp_media), storage_key)
             title = (source_post.caption_snapshot or f"{_platform_title(platform)} source import").replace("\n", " ").strip()[:140]
             video = Video(
                 id=video_id,
@@ -842,6 +844,9 @@ def _ensure_full_video_export(db, source_post: SocialWorkflowSourcePost, video: 
         db.add(clip)
         db.flush()
 
+    if not clip.thumbnail_key:
+        _ensure_workflow_clip_thumbnail(source_post, video, clip)
+
     existing = db.execute(
         select(Export)
         .where(
@@ -874,6 +879,66 @@ def _ensure_full_video_export(db, source_post: SocialWorkflowSourcePost, video: 
     db.add(export)
     db.flush()
     return export, True
+
+
+def _ensure_workflow_clip_thumbnail(source_post: SocialWorkflowSourcePost, video: Video, clip: Clip) -> None:
+    if not video.storage_key:
+        return
+
+    thumb_storage_key = clip_thumbnail_key(str(video.user_id), str(video.id), str(clip.id))
+    tmp_dir = Path(tempfile.mkdtemp(prefix=f"clipbandit-workflow-thumb-{clip.id}-"))
+    source_path = tmp_dir / "source.mp4"
+    thumb_path = tmp_dir / "thumbnail.jpg"
+    try:
+        object_storage_client.download_file(video.storage_key, str(source_path))
+        duration = max(float(clip.end_time or 0) - float(clip.start_time or 0), 0.0)
+        offsets = [
+            min(max(duration * 0.12, 0.25), max(duration - 0.25, 0.25)),
+            min(max(duration * 0.5, 0.25), max(duration - 0.25, 0.25)),
+            0.0,
+        ]
+        seen: set[float] = set()
+        for offset in offsets:
+            timestamp = round(float(clip.start_time or 0) + max(offset, 0.0), 3)
+            if timestamp in seen:
+                continue
+            seen.add(timestamp)
+            try:
+                extract_thumbnail(str(source_path), str(thumb_path), timestamp)
+                object_storage_client.upload_file(str(thumb_path), thumb_storage_key)
+                clip.thumbnail_key = thumb_storage_key
+                logger.info(
+                    "[workflows] generated source clip thumbnail source_post_id=%s video_id=%s clip_id=%s key=%s",
+                    source_post.id,
+                    video.id,
+                    clip.id,
+                    thumb_storage_key,
+                )
+                return
+            except Exception as exc:
+                logger.warning(
+                    "[workflows] source clip thumbnail attempt failed source_post_id=%s video_id=%s clip_id=%s ts=%s error=%s",
+                    source_post.id,
+                    video.id,
+                    clip.id,
+                    timestamp,
+                    sanitize_sensitive_text(exc),
+                )
+    except Exception as exc:
+        logger.warning(
+            "[workflows] source clip thumbnail generation failed source_post_id=%s video_id=%s clip_id=%s error=%s",
+            source_post.id,
+            video.id,
+            clip.id,
+            sanitize_sensitive_text(exc),
+        )
+    finally:
+        try:
+            for path in (source_path, thumb_path):
+                path.unlink(missing_ok=True)
+            tmp_dir.rmdir()
+        except OSError:
+            pass
 
 
 def _hashtags_from_caption(caption: str | None) -> list[str] | None:
