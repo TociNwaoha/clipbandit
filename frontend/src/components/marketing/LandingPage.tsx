@@ -682,8 +682,6 @@ export function LandingPage({ displayClassName = "marketing-display", bodyClassN
       </footer>
 
       <style jsx global>{`
-        @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
-
         .marketing-display {
           font-family: "Bricolage Grotesque", Inter, sans-serif;
         }

@@ -1,8 +1,4 @@
 import type { Metadata } from "next";
-import { Bricolage_Grotesque, Plus_Jakarta_Sans } from "next/font/google";
-
-const bricolage = Bricolage_Grotesque({ subsets: ["latin"], weight: ["700", "800"] });
-const jakarta = Plus_Jakarta_Sans({ subsets: ["latin"], weight: ["400", "500", "600", "700"] });
 
 const EFFECTIVE_DATE = "May 16, 2026";
 
@@ -16,14 +12,14 @@ export const metadata: Metadata = {
 
 export default function PrivacyPage() {
   return (
-    <main className={`${jakarta.className} min-h-screen bg-[#F6FAFF] px-4 py-10 text-[#091528] sm:px-6`}>
+    <main className="app-body min-h-screen bg-[#F6FAFF] px-4 py-10 text-[#091528] sm:px-6">
       <div className="mx-auto w-full max-w-4xl rounded-3xl border border-[#D6E2F5] bg-white p-6 shadow-[0_12px_28px_rgba(9,21,40,0.08)] sm:p-8">
         <header className="mb-8 border-b border-[#E2ECFA] pb-6">
           <div className="flex items-center gap-3">
             <img src="/icon.png" alt="PostBandit logo" width={40} height={40} className="h-10 w-10 rounded-lg" />
-            <p className={`${bricolage.className} text-2xl font-extrabold tracking-tight text-[#1D3FD0]`}>PostBandit</p>
+            <p className="app-display text-2xl font-extrabold tracking-tight text-[#1D3FD0]">PostBandit</p>
           </div>
-          <h1 className={`${bricolage.className} mt-5 text-3xl font-extrabold tracking-tight text-[#091528] sm:text-4xl`}>
+          <h1 className="app-display mt-5 text-3xl font-extrabold tracking-tight text-[#091528] sm:text-4xl">
             Privacy Policy
           </h1>
           <p className="mt-2 text-sm text-[#4A6080]">Effective date: {EFFECTIVE_DATE}</p>
