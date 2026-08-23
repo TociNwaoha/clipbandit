@@ -12,6 +12,8 @@ from app.models.user import User
 def get_user_platforms_allowed(user: User) -> int:
     if user.subscription_status == "beta_active" and user.platforms_allowed is not None:
         return int(user.platforms_allowed)
+    if user.beta_variant == "card_required" and user.subscription_status == "pending_checkout":
+        return get_platforms_allowed("creator", "trialing")
     return get_platforms_allowed(user.billing_plan, user.subscription_status)
 
 

@@ -30,7 +30,11 @@ export function DashboardLayout({ title, children }: DashboardLayoutProps) {
       try {
         const billing = await api.get<BillingStatus>("/api/billing/status");
         if (!active) return;
-        if (billing.beta_variant === "card_required" && billing.subscription_status === "pending_checkout") {
+        if (
+          billing.beta_variant === "card_required"
+          && billing.subscription_status === "pending_checkout"
+          && !billing.beta_card_walkthrough_completed_at
+        ) {
           router.replace("/beta/welcome");
           return;
         }

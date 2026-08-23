@@ -18,6 +18,9 @@ PENDING_CHECKOUT_ALLOWED_PATHS = {
     ("GET", "/api/billing/status"),
     ("POST", "/api/billing/signup-checkout"),
     ("POST", "/api/auth/beta/activate"),
+    ("POST", "/api/auth/beta-card/activate"),
+    ("POST", "/api/auth/beta-card/walkthrough-complete"),
+    ("POST", "/api/billing/beta-card-checkout"),
     ("POST", "/api/auth/me/delete"),
 }
 
@@ -56,8 +59,14 @@ async def get_current_user(
             user.subscription_status = "pending_checkout"
             user.platforms_allowed = 0
             await db.commit()
+    is_pending_card_beta = (
+        user.is_beta_tester
+        and user.beta_variant == "card_required"
+        and user.subscription_status == "pending_checkout"
+    )
     if (
         user.subscription_status == "pending_checkout"
+        and not is_pending_card_beta
         and (request.method, request.url.path) not in PENDING_CHECKOUT_ALLOWED_PATHS
     ):
         raise HTTPException(

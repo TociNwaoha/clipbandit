@@ -21,7 +21,7 @@ def _status(user: User) -> OnboardingStatusResponse:
         should_onboard=user.onboarding_completed_at is None and user.onboarding_skipped_at is None,
         is_beta_active=user.is_beta_tester and (
             user.subscription_status == "beta_active"
-            or (user.beta_variant == "card_required" and user.subscription_status in {"trialing", "active"})
+            or (user.beta_variant == "card_required" and user.subscription_status in {"pending_checkout", "trialing", "active"})
         ),
     )
 

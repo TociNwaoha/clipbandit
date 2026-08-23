@@ -19,6 +19,7 @@ type SignupResponse = {
 interface SignupFormProps {
   googleEnabled: boolean;
   betaAccessCode?: string;
+  cardBetaInvite?: boolean;
 }
 
 function GoogleIcon({ className = "" }: { className?: string }) {
@@ -44,7 +45,7 @@ function GoogleIcon({ className = "" }: { className?: string }) {
   );
 }
 
-export function SignupForm({ googleEnabled, betaAccessCode }: SignupFormProps) {
+export function SignupForm({ googleEnabled, betaAccessCode, cardBetaInvite = false }: SignupFormProps) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -82,7 +83,7 @@ export function SignupForm({ googleEnabled, betaAccessCode }: SignupFormProps) {
         router.push("/login?signup=success");
         return;
       }
-      if (payload.user?.beta_variant === "card_required") {
+      if (cardBetaInvite || payload.user?.beta_variant === "card_required") {
         router.push("/beta/welcome");
       } else {
         router.push(payload.user?.subscription_status === "beta_active" ? "/dashboard" : "/start-trial");

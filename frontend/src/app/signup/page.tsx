@@ -115,7 +115,7 @@ export default function SignupPage({ searchParams }: SignupPageProps) {
           <div className="w-full max-w-md">
             {isCardBetaInvite && betaAccessCode ? <CardRequiredBetaSignupActivation betaAccessCode={betaAccessCode} /> : null}
             {!isCardBetaInvite && betaAccessCode ? <BetaSignupActivation betaAccessCode={betaAccessCode} /> : null}
-            <SignupForm googleEnabled={googleEnabled} betaAccessCode={betaAccessCode} />
+            <SignupForm googleEnabled={googleEnabled} betaAccessCode={betaAccessCode} cardBetaInvite={isCardBetaInvite} />
             {accountDeleted ? (
               <div className="mt-4 rounded-lg border border-amber-300/35 bg-amber-400/15 px-3 py-2 text-sm text-amber-100">
                 Your account was deleted successfully.

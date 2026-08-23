@@ -28,6 +28,8 @@ async def get_user_storage_limits(db: AsyncSession, user_id: uuid.UUID) -> tuple
         and user.beta_storage_hard_stop_bytes is not None
     ):
         return int(user.beta_storage_quota_bytes), int(user.beta_storage_hard_stop_bytes)
+    if user.beta_variant == "card_required" and user.subscription_status == "pending_checkout":
+        return get_storage_limits("creator", "trialing")
     return get_storage_limits(user.billing_plan, user.subscription_status)
 
 

@@ -5,6 +5,7 @@ import pytest
 
 from app.api.routes.auth import activate_card_beta_access, complete_card_beta_walkthrough, signup
 from app.api.routes import billing as billing_routes
+from app.billing.enforcement import get_user_platforms_allowed
 from app.billing import stripe_client
 from app.config import settings
 from app.schemas.user import BetaActivationRequest, SignupRequest
@@ -176,3 +177,13 @@ async def test_card_beta_checkout_uses_creator_price_and_a_thirty_day_trial(monk
     assert captured["trial_period_days"] == 30
     assert captured["success_url"] == "https://postbandit.example.test/beta/welcome?status=checkout_success"
     assert captured["cancel_url"] == "https://postbandit.example.test/beta/welcome?status=checkout_cancelled"
+
+
+def test_pending_card_beta_uses_creator_platform_limits_before_checkout():
+    user = type(
+        "CardBetaUser",
+        (),
+        {"beta_variant": "card_required", "subscription_status": "pending_checkout", "platforms_allowed": 0, "billing_plan": "trial"},
+    )()
+
+    assert get_user_platforms_allowed(user) == 5

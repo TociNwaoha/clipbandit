@@ -54,3 +54,23 @@ async def test_expired_beta_access_transitions_to_pending_checkout():
     assert user.platforms_allowed == 0
     assert user.is_beta_tester is True
     assert db.commits == 1
+
+
+@pytest.mark.asyncio
+async def test_pending_card_beta_can_access_the_dashboard_api():
+    user = User(
+        id=uuid.uuid4(),
+        email="card-beta@example.com",
+        password_hash="hash",
+        subscription_status="pending_checkout",
+        is_beta_tester=True,
+        beta_variant="card_required",
+    )
+    db = _FakeSession(user)
+    request = Request({"type": "http", "method": "GET", "path": "/api/videos", "headers": []})
+    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=create_access_token(str(user.id)))
+
+    current_user = await get_current_user(request=request, credentials=credentials, db=db)
+
+    assert current_user is user
+    assert db.commits == 0

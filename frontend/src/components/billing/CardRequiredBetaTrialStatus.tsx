@@ -46,17 +46,28 @@ export function CardRequiredBetaTrialStatus() {
     };
   }, [status]);
 
-  if (
-    !status ||
-    status.beta_variant !== "card_required" ||
-    status.subscription_status !== "trialing" ||
-    !trial
-  ) {
+  if (!status || status.beta_variant !== "card_required") {
     return null;
   }
 
   const creatorPlan = plans.find((plan) => plan.tier === "creator");
   const amount = creatorPlan ? formatAmount(creatorPlan.monthly_price_cents) : "$18";
+
+  if (status.subscription_status === "pending_checkout") {
+    return (
+      <section className="mx-8 mt-4 rounded-xl border border-[#D6E2F5] bg-white px-4 py-3 text-sm text-[#334C6C]" aria-label="Beta setup status">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="leading-6">Your beta invite is active. Finish setting up your 30-day Creator trial whenever you&apos;re ready; your card will be charged {amount}/month only after the trial ends.</p>
+          <Link href="/beta/welcome" className="shrink-0 font-semibold text-[#1D3FD0] underline underline-offset-4 hover:text-[#1633B8]">Finish setup</Link>
+        </div>
+      </section>
+    );
+  }
+
+  if (status.subscription_status !== "trialing" || !trial) {
+    return null;
+  }
+
   const prominent = trial.daysRemaining <= 5;
 
   return (
