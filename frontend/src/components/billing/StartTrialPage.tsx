@@ -37,6 +37,10 @@ export function StartTrialPage() {
         ]);
         if (!active) return;
         setPlans(planRows);
+        if (status.beta_variant === "card_required" && status.subscription_status === "pending_checkout") {
+          router.replace("/beta/welcome");
+          return;
+        }
         if (status.subscription_status !== "pending_checkout") {
           router.replace("/dashboard");
           return;
