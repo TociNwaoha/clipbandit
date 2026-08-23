@@ -37,7 +37,9 @@ class BillingStatusResponse(BaseModel):
     subscription_status: str
     trial_ends_at: datetime | None
     is_beta_tester: bool
+    beta_variant: str | None
     beta_welcome_seen_at: datetime | None
+    beta_card_walkthrough_completed_at: datetime | None
     billing_period_start: datetime | None
     billing_period_end: datetime | None
     platforms_allowed: int

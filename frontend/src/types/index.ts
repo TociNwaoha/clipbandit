@@ -14,7 +14,9 @@ export interface User {
   subscription_status?: string;
   trial_ends_at?: string | null;
   is_beta_tester?: boolean;
+  beta_variant?: string | null;
   beta_welcome_seen_at?: string | null;
+  beta_card_walkthrough_completed_at?: string | null;
   billing_period_start?: string | null;
   billing_period_end?: string | null;
   platforms_allowed?: number;
@@ -745,7 +747,9 @@ export interface BillingStatus {
   subscription_status: string;
   trial_ends_at: string | null;
   is_beta_tester: boolean;
+  beta_variant: string | null;
   beta_welcome_seen_at: string | null;
+  beta_card_walkthrough_completed_at: string | null;
   billing_period_start: string | null;
   billing_period_end: string | null;
   platforms_allowed: number;

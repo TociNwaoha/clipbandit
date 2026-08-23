@@ -67,6 +67,12 @@ def _has_valid_beta_access_code(value: str | None) -> bool:
     return bool(configured_code) and bool(submitted_code) and secrets.compare_digest(submitted_code, configured_code)
 
 
+def _has_valid_card_beta_access_code(value: str | None) -> bool:
+    configured_code = (settings.beta_card_access_code or "").strip()
+    submitted_code = (value or "").strip()
+    return bool(configured_code) and bool(submitted_code) and secrets.compare_digest(submitted_code, configured_code)
+
+
 def _activate_beta_access(user: User) -> None:
     creator_plan = get_plan("creator")
     user.is_beta_tester = True
@@ -75,6 +81,12 @@ def _activate_beta_access(user: User) -> None:
     user.platforms_allowed = creator_plan.platforms_allowed
     user.beta_storage_quota_bytes = creator_plan.storage_quota_bytes
     user.beta_storage_hard_stop_bytes = creator_plan.storage_hard_stop_bytes
+
+
+def _mark_card_required_beta(user: User) -> None:
+    """Record the invite origin without granting access before Stripe confirms checkout."""
+    user.is_beta_tester = True
+    user.beta_variant = "card_required"
 
 
 @router.get("/users/me/caption-preset")
@@ -159,7 +171,9 @@ async def signup(body: SignupRequest, db: AsyncSession = Depends(get_db)):
         subscription_status="pending_checkout",
         platforms_allowed=0,
     )
-    if _has_valid_beta_access_code(body.beta_access_code):
+    if _has_valid_card_beta_access_code(body.beta_access_code):
+        _mark_card_required_beta(user)
+    elif _has_valid_beta_access_code(body.beta_access_code):
         _activate_beta_access(user)
     db.add(user)
     await db.commit()
@@ -189,6 +203,41 @@ async def activate_beta_access(
     _activate_beta_access(current_user)
     await db.commit()
     return MessageResponse(message="Beta access activated")
+
+
+@router.post("/auth/beta-card/activate", response_model=MessageResponse)
+async def activate_card_beta_access(
+    body: BetaActivationRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Record the card-required invite after a Google signup, before Checkout."""
+    if not _has_valid_card_beta_access_code(body.beta_access_code):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid beta access code")
+    if current_user.subscription_status != "pending_checkout":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Beta access is only available before checkout")
+    if current_user.stripe_customer_id or current_user.stripe_subscription_id:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Beta access is not available after Stripe checkout begins")
+
+    _mark_card_required_beta(current_user)
+    await db.commit()
+    return MessageResponse(message="Card-required beta access activated")
+
+
+@router.post("/auth/beta-card/walkthrough-complete", response_model=MessageResponse)
+async def complete_card_beta_walkthrough(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user.is_beta_tester or current_user.beta_variant != "card_required":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Card-required beta access is not active")
+    if current_user.subscription_status != "pending_checkout":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Walkthrough is only available before checkout")
+
+    if current_user.beta_card_walkthrough_completed_at is None:
+        current_user.beta_card_walkthrough_completed_at = datetime.now(timezone.utc)
+        await db.commit()
+    return MessageResponse(message="Beta walkthrough acknowledged")
 
 
 @router.post("/auth/beta/welcome-seen", response_model=MessageResponse)

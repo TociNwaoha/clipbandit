@@ -48,6 +48,8 @@ class Settings(BaseSettings):
 
     # Shared beta invite. Leave empty to disable beta signup access.
     beta_access_code: str = ""
+    # Card-required beta invite. This creates a real Stripe Creator trial.
+    beta_card_access_code: str = ""
 
     # Product analytics
     posthog_api_key: str = ""

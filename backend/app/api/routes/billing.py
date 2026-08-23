@@ -84,7 +84,9 @@ async def billing_status(
         subscription_status=current_user.subscription_status,
         trial_ends_at=current_user.trial_ends_at,
         is_beta_tester=current_user.is_beta_tester,
+        beta_variant=current_user.beta_variant,
         beta_welcome_seen_at=current_user.beta_welcome_seen_at,
+        beta_card_walkthrough_completed_at=current_user.beta_card_walkthrough_completed_at,
         billing_period_start=current_user.billing_period_start,
         billing_period_end=current_user.billing_period_end,
         platforms_allowed=current_user.platforms_allowed,
@@ -146,6 +148,38 @@ async def create_signup_checkout(
             price_id=get_price_id(plan),
             success_url=_frontend_url("/start-trial?status=checkout_success"),
             cancel_url=_frontend_url("/start-trial?status=checkout_cancelled"),
+        )
+    except BillingConfigurationError as exc:
+        raise _billing_unavailable(exc) from exc
+
+    return BillingCheckoutResponse(checkout_url=session["url"])
+
+
+@router.post("/beta-card-checkout", response_model=BillingCheckoutResponse)
+async def create_card_beta_checkout(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Create the isolated 30-day Creator Checkout for the card-required beta invite."""
+    if (
+        not current_user.is_beta_tester
+        or current_user.beta_variant != "card_required"
+        or current_user.subscription_status != "pending_checkout"
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Card-required beta checkout is not available")
+    if current_user.beta_card_walkthrough_completed_at is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Complete the beta walkthrough before checkout")
+
+    customer_id = await _ensure_customer(current_user, db)
+    try:
+        session = await create_checkout_session(
+            customer_id=customer_id,
+            user_id=str(current_user.id),
+            plan="creator",
+            price_id=get_price_id("creator"),
+            success_url=_frontend_url("/beta/welcome?status=checkout_success"),
+            cancel_url=_frontend_url("/beta/welcome?status=checkout_cancelled"),
+            trial_period_days=30,
         )
     except BillingConfigurationError as exc:
         raise _billing_unavailable(exc) from exc

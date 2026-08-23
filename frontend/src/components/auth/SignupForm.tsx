@@ -11,6 +11,7 @@ type SignupResponse = {
     id: string;
     email: string;
     subscription_status?: string;
+    beta_variant?: string | null;
   };
   detail?: string;
 };
@@ -81,7 +82,11 @@ export function SignupForm({ googleEnabled, betaAccessCode }: SignupFormProps) {
         router.push("/login?signup=success");
         return;
       }
-      router.push(payload.user?.subscription_status === "beta_active" ? "/dashboard" : "/start-trial");
+      if (payload.user?.beta_variant === "card_required") {
+        router.push("/beta/welcome");
+      } else {
+        router.push(payload.user?.subscription_status === "beta_active" ? "/dashboard" : "/start-trial");
+      }
       router.refresh();
     } catch {
       setError("Network error. Please try again.");

@@ -1,6 +1,9 @@
+import { timingSafeEqual } from "crypto";
+import type { Metadata } from "next";
 import Link from "next/link";
 import { SignupForm } from "@/components/auth/SignupForm";
 import { BetaSignupActivation } from "@/components/auth/BetaSignupActivation";
+import { CardRequiredBetaSignupActivation } from "@/components/auth/CardRequiredBetaSignupActivation";
 
 interface SignupPageProps {
   searchParams?: {
@@ -9,10 +12,43 @@ interface SignupPageProps {
   };
 }
 
+export const dynamic = "force-dynamic";
+
+const BETA_OG_TITLE = "You're invited to test PostBandit";
+const BETA_OG_DESCRIPTION = "30 days of full access. Turn videos into clips and publish everywhere — YouTube, TikTok, Instagram, Facebook, Threads, and X.";
+
+function isCardBetaCode(value: string | undefined) {
+  const submitted = value?.trim();
+  const configured = process.env.BETA_CARD_ACCESS_CODE?.trim();
+  if (!submitted || !configured || submitted.length !== configured.length) return false;
+  return timingSafeEqual(Buffer.from(submitted), Buffer.from(configured));
+}
+
+export function generateMetadata({ searchParams }: SignupPageProps): Metadata {
+  if (!isCardBetaCode(searchParams?.beta)) return {};
+
+  return {
+    title: BETA_OG_TITLE,
+    description: BETA_OG_DESCRIPTION,
+    openGraph: {
+      title: BETA_OG_TITLE,
+      description: BETA_OG_DESCRIPTION,
+      images: [{ url: "/postbandit-beta-og.png", width: 1200, height: 630, alt: BETA_OG_TITLE }],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: BETA_OG_TITLE,
+      description: BETA_OG_DESCRIPTION,
+      images: ["/postbandit-beta-og.png"],
+    },
+  };
+}
+
 export default function SignupPage({ searchParams }: SignupPageProps) {
   const googleEnabled = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
   const accountDeleted = searchParams?.account === "deleted";
   const betaAccessCode = searchParams?.beta?.trim() || undefined;
+  const isCardBetaInvite = isCardBetaCode(betaAccessCode);
 
   return (
     <main
@@ -77,7 +113,8 @@ export default function SignupPage({ searchParams }: SignupPageProps) {
 
         <section className="relative z-10 flex justify-center md:justify-end">
           <div className="w-full max-w-md">
-            {betaAccessCode ? <BetaSignupActivation betaAccessCode={betaAccessCode} /> : null}
+            {isCardBetaInvite && betaAccessCode ? <CardRequiredBetaSignupActivation betaAccessCode={betaAccessCode} /> : null}
+            {!isCardBetaInvite && betaAccessCode ? <BetaSignupActivation betaAccessCode={betaAccessCode} /> : null}
             <SignupForm googleEnabled={googleEnabled} betaAccessCode={betaAccessCode} />
             {accountDeleted ? (
               <div className="mt-4 rounded-lg border border-amber-300/35 bg-amber-400/15 px-3 py-2 text-sm text-amber-100">

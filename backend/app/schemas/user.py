@@ -17,7 +17,9 @@ class UserBase(BaseModel):
     trial_ends_at: datetime | None = None
     is_beta_tester: bool = False
     beta_expires_at: datetime | None = None
+    beta_variant: str | None = None
     beta_welcome_seen_at: datetime | None = None
+    beta_card_walkthrough_completed_at: datetime | None = None
     billing_period_start: datetime | None = None
     billing_period_end: datetime | None = None
     platforms_allowed: int = 5

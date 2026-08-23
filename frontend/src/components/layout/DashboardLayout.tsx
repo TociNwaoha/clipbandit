@@ -7,6 +7,7 @@ import { signOut } from "next-auth/react";
 import { ApiError, api } from "@/lib/api";
 import { BillingStatus, OnboardingStatus } from "@/types";
 import { TrialBanner } from "@/components/billing/TrialBanner";
+import { CardRequiredBetaTrialStatus } from "@/components/billing/CardRequiredBetaTrialStatus";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
 
@@ -29,11 +30,15 @@ export function DashboardLayout({ title, children }: DashboardLayoutProps) {
       try {
         const billing = await api.get<BillingStatus>("/api/billing/status");
         if (!active) return;
+        if (billing.beta_variant === "card_required" && billing.subscription_status === "pending_checkout") {
+          router.replace("/beta/welcome");
+          return;
+        }
         if (billing.subscription_status === "pending_checkout") {
           setLocked(true);
           return;
         }
-        if (billing.is_beta_tester && !billing.beta_welcome_seen_at) {
+        if (billing.is_beta_tester && billing.beta_variant !== "card_required" && !billing.beta_welcome_seen_at) {
           setShowBetaWelcome(true);
           return;
         }
@@ -77,6 +82,7 @@ export function DashboardLayout({ title, children }: DashboardLayoutProps) {
       <div className="flex flex-col flex-1 min-w-0">
         <Header title={title} />
         <TrialBanner />
+        <CardRequiredBetaTrialStatus />
         <main className="flex-1 px-8 py-6 overflow-auto">{locked ? <LockedWorkspacePrompt onStartTrial={() => router.push("/start-trial")} /> : children}</main>
       </div>
       {showBetaWelcome ? <BetaWelcomeModal onAcknowledge={acknowledgeBetaWelcome} /> : null}

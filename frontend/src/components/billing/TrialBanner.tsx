@@ -27,6 +27,7 @@ export function TrialBanner() {
     dismissed ||
     !status ||
     !status.billing_enabled ||
+    status.beta_variant === "card_required" ||
     status.subscription_status !== "trialing" ||
     daysLeft === null ||
     daysLeft > 3 ||

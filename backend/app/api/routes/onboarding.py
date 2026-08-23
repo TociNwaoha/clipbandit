@@ -19,7 +19,10 @@ def _status(user: User) -> OnboardingStatusResponse:
         tier=user.tier,
         metadata=user.onboarding_metadata_json or {},
         should_onboard=user.onboarding_completed_at is None and user.onboarding_skipped_at is None,
-        is_beta_active=user.is_beta_tester and user.subscription_status == "beta_active",
+        is_beta_active=user.is_beta_tester and (
+            user.subscription_status == "beta_active"
+            or (user.beta_variant == "card_required" and user.subscription_status in {"trialing", "active"})
+        ),
     )
 
 
