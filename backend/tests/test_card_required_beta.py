@@ -175,3 +175,4 @@ async def test_card_beta_checkout_uses_creator_price_and_a_thirty_day_trial(monk
     assert captured["price_id"] == "price_creator"
     assert captured["trial_period_days"] == 30
     assert captured["success_url"] == "https://postbandit.example.test/beta/welcome?status=checkout_success"
+    assert captured["cancel_url"] == "https://postbandit.example.test/beta/welcome?status=checkout_cancelled"

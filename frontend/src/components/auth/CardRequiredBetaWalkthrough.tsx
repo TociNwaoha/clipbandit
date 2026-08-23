@@ -124,6 +124,7 @@ export function CardRequiredBetaWalkthrough() {
           <div className="mt-10">
             <h1 className="app-display text-4xl font-extrabold tracking-[-0.04em]">Set up your 30-day beta access.</h1>
             <p className="mt-5 text-base leading-7 text-[#4A6080]">We&apos;ll ask for a card to hold your spot. You won&apos;t be charged until day 30, when the Creator plan will be charged at $18/month. You can cancel anytime before then from your billing settings.</p>
+            {checkoutCancelled ? <p className="mt-6 rounded-xl border border-[#D6E2F5] bg-[#F4F8FF] px-4 py-3 text-sm leading-6 text-[#4A6080]">No rush. Your invite&apos;s still good whenever you&apos;re ready.</p> : null}
             <button type="button" onClick={() => void startCheckout()} disabled={busy} className="mt-9 w-full rounded-xl bg-[#1D3FD0] px-5 py-3.5 text-sm font-bold text-white transition hover:bg-[#1633B8] disabled:cursor-not-allowed disabled:opacity-60">{busy ? "Opening checkout..." : "Continue to setup →"}</button>
           </div>
         ) : (
