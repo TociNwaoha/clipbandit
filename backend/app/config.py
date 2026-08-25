@@ -172,6 +172,10 @@ class Settings(BaseSettings):
     whisper_beam_size: int = 1
     whisper_best_of: int = 1
     whisper_condition_on_previous_text: bool = False
+    # Long-form CPU transcription can exceed one hour. Keep a short hard-limit
+    # grace period so Celery can finish cleanup after the soft timeout.
+    transcribe_soft_time_limit_seconds: int = 6 * 60 * 60
+    transcribe_time_limit_seconds: int = (6 * 60 * 60) + (5 * 60)
 
     class Config:
         env_file = ".env"

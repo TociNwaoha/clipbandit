@@ -113,8 +113,8 @@ def _latest_transcribe_job(db, video_uuid: uuid.UUID) -> Job | None:
     queue="transcribe",
     bind=True,
     max_retries=2,
-    soft_time_limit=3600,
-    time_limit=3900,
+    soft_time_limit=settings.transcribe_soft_time_limit_seconds,
+    time_limit=settings.transcribe_time_limit_seconds,
 )
 def transcribe_job(self, video_id: str):
     """
