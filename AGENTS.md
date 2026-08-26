@@ -75,10 +75,14 @@ If you are unsure which you are, you are a builder.
   a production deployment.
 - Syntax-only checks such as `compileall` are not verification. They cannot catch missing
   imports, undefined names, import-time failures, or runtime failures.
-- For every backend or worker change, run an actual import test inside the project
-  container (for example, `python -c "import app.worker.tasks.transcribe"`) and run the
-  affected tests there. Local compilation or locally passing tests are never sufficient
-  evidence for a production change.
+- For every backend or worker change, the deploy agent must perform pre-deploy verification
+  on the VPS from a fresh, non-production checkout of the exact pushed candidate SHA (never
+  `/opt/clipbandit`). Build a temporary candidate image from that checkout, then run actual
+  imports (for example, `python -c "import app.worker.tasks.transcribe"`) and the affected
+  tests in that image. The verification container must have no production `.env`, database,
+  Redis, bind mounts, volumes, ports, or network access. Tests needing services require
+  dedicated disposable test services; local compilation or locally passing tests are never
+  sufficient evidence for a production change.
 - Any module loaded during backend or worker startup requires an explicit import or boot
   check before deployment. A failure there can take down every task handled by that
   process, not only the path being changed.
