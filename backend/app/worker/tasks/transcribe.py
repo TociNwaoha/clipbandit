@@ -10,6 +10,7 @@ from pathlib import Path
 from sqlalchemy import select
 
 from app.celery_app import celery_app
+from app.config import settings
 from app.database import SyncSessionLocal
 from app.models.job import Job, JobStatus
 from app.models.transcript import TranscriptSegment
