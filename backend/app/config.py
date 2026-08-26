@@ -176,6 +176,7 @@ class Settings(BaseSettings):
     # grace period so Celery can finish cleanup after the soft timeout.
     transcribe_soft_time_limit_seconds: int = 6 * 60 * 60
     transcribe_time_limit_seconds: int = (6 * 60 * 60) + (5 * 60)
+    transcribe_dispatch_stalled_seconds: int = 5 * 60
 
     class Config:
         env_file = ".env"

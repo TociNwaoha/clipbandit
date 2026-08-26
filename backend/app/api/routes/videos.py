@@ -261,7 +261,23 @@ async def _enqueue_transcribe_job(db: AsyncSession, video: Video) -> None:
         job.celery_task_id = task.id
         await db.commit()
     except Exception as exc:
+        job.status = JobStatus.failed
+        job.error = f"Unable to enqueue transcription: {exc}"[:500]
+        job.completed_at = datetime.now(timezone.utc)
+        video.status = VideoStatus.error
+        video.error_message = "Unable to queue transcription. Please retry."
+        await db.commit()
         logger.warning("[videos] Unable to enqueue transcribe task for video %s: %s", video.id, exc)
+
+
+async def _latest_transcribe_job_for_video(db: AsyncSession, video_id: uuid.UUID) -> Job | None:
+    result = await db.execute(
+        select(Job)
+        .where(Job.video_id == video_id, Job.type == "transcribe")
+        .order_by(Job.created_at.desc())
+        .limit(1)
+    )
+    return result.scalars().first()
 
 
 async def _enqueue_score_job(db: AsyncSession, video: Video, clip_profile: ClipProfile) -> None:
@@ -339,7 +355,7 @@ async def _finalize_manual_upload_transition(
     video.storage_key = storage_key
     if file_size_bytes and file_size_bytes > 0:
         video.file_size_bytes = file_size_bytes
-    video.status = VideoStatus.transcribing
+    video.status = VideoStatus.queued
     video.import_mode = VideoImportMode.manual_upload
     video.is_download_blocked = False
     video.error_message = None
@@ -383,7 +399,30 @@ def _raw_source_days_remaining(expires_at: datetime | None) -> int | None:
     return max(0, int(ceil(seconds_remaining / 86400)))
 
 
-def _video_to_list_item(video: Video, thumbnail_url: str | None) -> VideoListItem:
+def _transcription_display_status(video: Video, transcribe_job: Job | None = None) -> str:
+    if transcribe_job and transcribe_job.status == JobStatus.running:
+        return VideoStatus.transcribing.value
+    if video.status != VideoStatus.queued:
+        return video.status.value
+    if not transcribe_job or transcribe_job.status != JobStatus.queued or transcribe_job.celery_task_id:
+        return VideoStatus.queued.value
+    created_at = transcribe_job.created_at
+    if created_at is None:
+        return VideoStatus.queued.value
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    age_seconds = (datetime.now(timezone.utc) - created_at).total_seconds()
+    if age_seconds >= max(1, int(settings.transcribe_dispatch_stalled_seconds)):
+        return "stalled"
+    return VideoStatus.queued.value
+
+
+def _video_to_list_item(
+    video: Video,
+    thumbnail_url: str | None,
+    *,
+    transcribe_job: Job | None = None,
+) -> VideoListItem:
     import_state = _import_state_for_response(video)
     clip_profile = _clip_profile_for_video(video)
     raw_source_expires_at = _raw_source_expires_at(video)
@@ -391,6 +430,7 @@ def _video_to_list_item(video: Video, thumbnail_url: str | None) -> VideoListIte
         id=video.id,
         title=video.title,
         status=video.status,
+        display_status=_transcription_display_status(video, transcribe_job),
         duration_sec=video.duration_sec,
         clip_count=video.clip_count,
         created_at=video.created_at,
@@ -421,6 +461,7 @@ def _video_to_response(
     *,
     editor_preview_download_url: str | None = None,
     editor_preview_status: str | None = None,
+    transcribe_job: Job | None = None,
 ) -> VideoResponse:
     import_state = _import_state_for_response(video)
     clip_profile = _clip_profile_for_video(video)
@@ -457,6 +498,7 @@ def _video_to_response(
         raw_source_expires_at=raw_source_expires_at,
         raw_source_days_remaining=_raw_source_days_remaining(raw_source_expires_at),
         status=video.status,
+        display_status=_transcription_display_status(video, transcribe_job),
         clip_count=video.clip_count,
         created_at=video.created_at,
         updated_at=video.updated_at,
@@ -528,6 +570,13 @@ async def confirm_upload(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
     if video.status in {VideoStatus.transcribing, VideoStatus.scoring, VideoStatus.ready}:
         return VideoConfirmUploadResponse(video_id=video.id, status=video.status)
+    active_job = await _latest_transcribe_job_for_video(db, video.id)
+    if active_job and active_job.status in {JobStatus.queued, JobStatus.running}:
+        return VideoConfirmUploadResponse(
+            video_id=video.id,
+            status=video.status,
+            display_status=_transcription_display_status(video, active_job),
+        )
     if video.status != VideoStatus.queued:
         logger.warning(
             "[upload_confirm_failed] video_id=%s reason=invalid_state status=%s",
@@ -543,7 +592,7 @@ async def confirm_upload(
         )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file not found in storage")
 
-    video.status = VideoStatus.transcribing
+    video.status = VideoStatus.queued
     video.external_metadata_json = _with_upload_confirmation_metadata(
         video.external_metadata_json,
         confirmed=True,
@@ -558,7 +607,12 @@ async def confirm_upload(
         {"video_id": str(video.id), "source_type": video.source_type.value, "import_mode": video.import_mode.value},
     )
     await _enqueue_transcribe_job(db, video)
-    return VideoConfirmUploadResponse(video_id=video.id, status=video.status)
+    transcribe_job = await _latest_transcribe_job_for_video(db, video.id)
+    return VideoConfirmUploadResponse(
+        video_id=video.id,
+        status=video.status,
+        display_status=_transcription_display_status(video, transcribe_job),
+    )
 
 
 @router.post("/videos/proxy-upload", response_model=VideoConfirmUploadResponse)
@@ -614,7 +668,7 @@ async def proxy_upload(
     finally:
         await file.close()
 
-    video.status = VideoStatus.transcribing
+    video.status = VideoStatus.queued
     video.external_metadata_json = _with_upload_confirmation_metadata(
         video.external_metadata_json,
         confirmed=True,
@@ -630,7 +684,12 @@ async def proxy_upload(
     )
     await _enqueue_transcribe_job(db, video)
     await _enqueue_editor_preview_proxy_job(db, video)
-    return VideoConfirmUploadResponse(video_id=video.id, status=video.status)
+    transcribe_job = await _latest_transcribe_job_for_video(db, video.id)
+    return VideoConfirmUploadResponse(
+        video_id=video.id,
+        status=video.status,
+        display_status=_transcription_display_status(video, transcribe_job),
+    )
 
 
 @router.post("/videos/import-youtube", response_model=VideoImportYoutubeResponse)
@@ -937,6 +996,14 @@ async def list_videos(
         return []
 
     video_ids = [video.id for video in videos]
+    latest_transcribe_jobs: dict[uuid.UUID, Job] = {}
+    jobs_result = await db.execute(
+        select(Job)
+        .where(Job.video_id.in_(video_ids), Job.type == "transcribe")
+        .order_by(Job.video_id.asc(), Job.created_at.desc())
+    )
+    for job in jobs_result.scalars().all():
+        latest_transcribe_jobs.setdefault(job.video_id, job)
     thumbnail_keys_by_video_id: dict[uuid.UUID, str] = {}
     thumbnail_urls_by_video_id: dict[uuid.UUID, str] = {}
 
@@ -974,7 +1041,13 @@ async def list_videos(
     rows: list[VideoListItem] = []
     for video in videos:
         preview_thumb = thumbnail_urls_by_video_id.get(video.id) or video.thumbnail_url
-        rows.append(_video_to_list_item(video, preview_thumb))
+        rows.append(
+            _video_to_list_item(
+                video,
+                preview_thumb,
+                transcribe_job=latest_transcribe_jobs.get(video.id),
+            )
+        )
     return rows
 
 
@@ -1409,6 +1482,7 @@ async def get_video(
     video = result.scalar_one_or_none()
     if not video:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
+    transcribe_job = await _latest_transcribe_job_for_video(db, video.id)
 
     if not _is_unconfirmed_upload_placeholder(video):
         await _enqueue_editor_preview_proxy_job(db, video)
@@ -1447,6 +1521,7 @@ async def get_video(
         source_download_url,
         editor_preview_download_url=editor_preview_download_url,
         editor_preview_status=preview_status,
+        transcribe_job=transcribe_job,
     )
 
 
@@ -1462,10 +1537,12 @@ async def get_video_status(
     video = result.scalar_one_or_none()
     if not video:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
+    transcribe_job = await _latest_transcribe_job_for_video(db, video.id)
 
     return VideoStatusResponse(
         video_id=video.id,
         status=video.status,
+        display_status=_transcription_display_status(video, transcribe_job),
         import_state=_import_state_for_response(video),
         import_state_ui=_import_state_ui_for_response(video),
         title=video.title,

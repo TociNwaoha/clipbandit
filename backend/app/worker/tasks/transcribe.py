@@ -202,6 +202,8 @@ def transcribe_job(self, video_id: str):
                 job.status = JobStatus.running
                 job.started_at = datetime.now(timezone.utc)
                 job.attempts = (job.attempts or 0) + 1
+                # The worker has accepted the task; only now is it transcribing.
+                video.status = VideoStatus.transcribing
                 db.commit()
 
             logger.info(f"Starting transcription for video {video_id}")

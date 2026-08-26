@@ -345,7 +345,7 @@ def sweep_stale_queued_uploads_impl(*, dry_run: bool) -> dict:
                 continue
 
             if storage_exists:
-                video.status = VideoStatus.transcribing
+                video.status = VideoStatus.queued
                 video.error_message = None
                 _set_upload_confirmed(video, confirmed=True)
                 db.commit()

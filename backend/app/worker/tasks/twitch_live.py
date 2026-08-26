@@ -72,7 +72,7 @@ def create_live_clip(self, video_id: str):
             video.thumbnail_url = clip.get("thumbnail_url")
             video.duration_sec = int(clip.get("duration") or 0) or None
             video.import_state = VideoImportState.processing
-            video.status = VideoStatus.transcribing
+            video.status = VideoStatus.queued
             video.twitch_clip_id = str(clip.get("id") or requested["id"])
             video.twitch_clip_slug = str(clip.get("id") or requested["id"])
             video.external_metadata_json = {"twitch_live": {"broadcaster_id": channel.twitch_broadcaster_id, "clip_url": clip_url}}
@@ -89,7 +89,7 @@ def create_live_clip(self, video_id: str):
                 job.status = JobStatus.done
                 job.completed_at = datetime.now(timezone.utc)
             db.commit()
-        return {"video_id": str(video_uuid), "status": "transcribing"}
+        return {"video_id": str(video_uuid), "status": "queued"}
     except TwitchAPIError as exc:
         logger.warning("[twitch_live] clip creation failed video_id=%s status=%s", video_id, exc.status_code)
         if exc.status_code in {429, 503} and self.request.retries < self.max_retries:
@@ -104,6 +104,19 @@ def create_live_clip(self, video_id: str):
                     job.status = JobStatus.failed
                     job.error = str(exc)[:1000]
                     job.completed_at = datetime.now(timezone.utc)
+                transcribe_job = (
+                    db.execute(
+                        select(Job)
+                        .where(Job.video_id == video_uuid, Job.type == "transcribe")
+                        .order_by(Job.created_at.desc())
+                    )
+                    .scalars()
+                    .first()
+                )
+                if transcribe_job and transcribe_job.status == JobStatus.queued:
+                    transcribe_job.status = JobStatus.failed
+                    transcribe_job.error = f"Unable to enqueue transcription: {exc}"[:500]
+                    transcribe_job.completed_at = datetime.now(timezone.utc)
                 db.commit()
         raise
     except Exception as exc:
@@ -117,6 +130,19 @@ def create_live_clip(self, video_id: str):
                     job.status = JobStatus.failed
                     job.error = str(exc)[:1000]
                     job.completed_at = datetime.now(timezone.utc)
+                transcribe_job = (
+                    db.execute(
+                        select(Job)
+                        .where(Job.video_id == video_uuid, Job.type == "transcribe")
+                        .order_by(Job.created_at.desc())
+                    )
+                    .scalars()
+                    .first()
+                )
+                if transcribe_job and transcribe_job.status == JobStatus.queued:
+                    transcribe_job.status = JobStatus.failed
+                    transcribe_job.error = f"Unable to enqueue transcription: {exc}"[:500]
+                    transcribe_job.completed_at = datetime.now(timezone.utc)
                 db.commit()
         raise
     finally:
