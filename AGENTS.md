@@ -67,6 +67,37 @@ If you are unsure which you are, you are a builder.
 - Never run Alembic migrations unless explicitly instructed
 - Never touch a service the task didn't name
 
+## Production release gate
+
+- Before changing production code, state the root cause and the complete execution path
+  affected. Report findings and STOP; do not investigate and edit in the same pass.
+- Make the smallest possible change: one fix per change. Never bundle unrelated work into
+  a production deployment.
+- Syntax-only checks such as `compileall` are not verification. They cannot catch missing
+  imports, undefined names, import-time failures, or runtime failures.
+- For every backend or worker change, run an actual import test inside the project
+  container (for example, `python -c "import app.worker.tasks.transcribe"`) and run the
+  affected tests there. Local compilation or locally passing tests are never sufficient
+  evidence for a production change.
+- Any module loaded during backend or worker startup requires an explicit import or boot
+  check before deployment. A failure there can take down every task handled by that
+  process, not only the path being changed.
+- Before deploying, state the real rollback path. If there is no usable rollback, say so
+  before deployment and wait for a human decision. Workers run from bind-mounted VPS
+  source, so rolling back a container image does not restore their previous code and must
+  never be presented as a rollback path.
+- A production change is complete only when container health is confirmed and one real
+  smoke test of the changed path succeeds in production. A clean build log is not a smoke
+  test.
+- For timeout, worker-concurrency, or queue-routing changes, explicitly analyze queue
+  occupancy: what holds a worker slot, for how long, and what waits behind it. Saying a
+  change does not affect processing speed is not enough; a longer timeout holds a slot
+  longer and can starve work behind it.
+- Never mark work as running before the queue has accepted it. Report and store the real
+  state so a dead worker is distinguishable from a slow job during an incident.
+- Builder agents do not SSH to the VPS, restart services, or re-enqueue production work.
+  Deploy agents perform production actions and report evidence back.
+
 ## Product accuracy
 
 Blog and marketing content must not claim unshipped features. Currently NOT shipped:
