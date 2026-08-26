@@ -21,6 +21,7 @@ interface VideoListProps {
 
 const statusStyles: Record<string, string> = {
   queued: "border border-[var(--app-border)] bg-[var(--app-surface-soft)] text-[var(--app-subtle)]",
+  stalled: "bg-amber-500/20 text-amber-700",
   downloading: "bg-blue-500/20 text-blue-700 animate-pulse",
   transcribing: "bg-blue-500/20 text-blue-700 animate-pulse",
   scoring: "bg-purple-500/20 text-purple-700 animate-pulse",
@@ -91,20 +92,20 @@ function importStateLabel(state: string): string {
 
 function displayStateKey(video: VideoListItem): string {
   if (!URL_IMPORT_SOURCE_TYPES.has(video.source_type) || !video.import_state) {
-    return video.status;
+    return video.display_status || video.status;
   }
   if (video.import_state === "processing") {
-    return video.status;
+    return video.display_status || video.status;
   }
   return video.import_state;
 }
 
 function displayStateLabel(video: VideoListItem): string {
   if (!URL_IMPORT_SOURCE_TYPES.has(video.source_type) || !video.import_state) {
-    return statusLabel(video.status);
+    return statusLabel(video.display_status || video.status);
   }
   if (video.import_state === "processing") {
-    return statusLabel(video.status);
+    return statusLabel(video.display_status || video.status);
   }
   return importStateLabel(video.import_state);
 }

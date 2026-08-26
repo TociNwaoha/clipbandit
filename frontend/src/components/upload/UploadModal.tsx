@@ -25,6 +25,7 @@ interface UploadUrlResponse {
 interface VideoStatusResponse {
   video_id: string;
   status: "queued" | "downloading" | "transcribing" | "scoring" | "ready" | "error";
+  display_status?: "queued" | "downloading" | "transcribing" | "scoring" | "ready" | "error" | "stalled" | null;
   error_message?: string | null;
 }
 

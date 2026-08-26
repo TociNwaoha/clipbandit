@@ -66,6 +66,7 @@ class VideoResponse(BaseModel):
     raw_source_expires_at: datetime | None = None
     raw_source_days_remaining: int | None = None
     status: VideoStatus
+    display_status: str | None = None
     error_message: str | None
     clip_count: int
     created_at: datetime
@@ -118,6 +119,7 @@ class VideoConfirmUploadRequest(BaseModel):
 class VideoConfirmUploadResponse(BaseModel):
     video_id: uuid.UUID
     status: VideoStatus
+    display_status: str | None = None
 
 
 class VideoImportYoutubeRequest(BaseModel):
@@ -173,6 +175,7 @@ class VideoListItem(BaseModel):
     id: uuid.UUID
     title: str | None
     status: VideoStatus
+    display_status: str | None = None
     duration_sec: int | None
     clip_count: int
     created_at: datetime
@@ -204,6 +207,7 @@ class VideoListItem(BaseModel):
 class VideoStatusResponse(BaseModel):
     video_id: uuid.UUID
     status: VideoStatus
+    display_status: str | None = None
     import_state: VideoImportState | None = None
     import_state_ui: str | None = None
     title: str | None

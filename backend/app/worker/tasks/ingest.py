@@ -306,7 +306,7 @@ def ingest_job(self, video_id: str):
                 raise ValueError(f"Video not found before finishing ingest: {video_id}")
 
             video.storage_key = storage_key
-            video.status = VideoStatus.transcribing
+            video.status = VideoStatus.queued
             video.import_mode = VideoImportMode.server_download
             video.is_download_blocked = False
             video.error_code = None
@@ -367,13 +367,18 @@ def ingest_job(self, video_id: str):
                 db.commit()
             except Exception as enqueue_exc:
                 logger.warning("[ingest] Unable to enqueue transcribe job for %s: %s", video.id, enqueue_exc)
+                transcribe_row.status = JobStatus.failed
+                transcribe_row.error = f"Unable to enqueue transcription: {enqueue_exc}"[:500]
+                transcribe_row.completed_at = datetime.now(timezone.utc)
+                video.status = VideoStatus.error
+                video.error_message = "Unable to queue transcription. Please retry."
                 db.commit()
 
         _refresh_playlist_progress(parent_id)
         if workspace:
             finalize_workspace(workspace, state="terminal_success", metadata={"result": "processing"})
         logger.info("[ingest] Completed ingest for video %s mode=server_download", video_id)
-        return {"video_id": video_id, "status": "transcribing"}
+        return {"video_id": video_id, "status": "queued"}
 
     except DownloadError as exc:
         if download_source_type in YOUTUBE_SOURCE_TYPES:

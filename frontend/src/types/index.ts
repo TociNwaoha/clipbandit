@@ -49,6 +49,7 @@ export type VideoStatus =
   | "scoring"
   | "ready"
   | "error";
+export type VideoDisplayStatus = VideoStatus | "stalled";
 
 export type VideoImportState =
   | "not_applicable"
@@ -102,6 +103,7 @@ export interface Video {
   raw_source_expires_at?: string | null;
   raw_source_days_remaining?: number | null;
   status: VideoStatus;
+  display_status?: VideoDisplayStatus | null;
   error_message: string | null;
   clip_count: number;
   created_at: string;
@@ -113,6 +115,7 @@ export interface VideoListItem {
   id: string;
   title: string | null;
   status: VideoStatus;
+  display_status?: VideoDisplayStatus | null;
   duration_sec: number | null;
   clip_count: number;
   created_at: string;

@@ -20,6 +20,7 @@ interface VideoDetailPanelProps {
 
 const statusStyles: Record<string, string> = {
   queued: "border border-[var(--app-border)] bg-[var(--app-surface-soft)] text-[var(--app-subtle)]",
+  stalled: "bg-amber-500/20 text-amber-700",
   downloading: "bg-blue-500/20 text-blue-700 animate-pulse",
   transcribing: "bg-blue-500/20 text-blue-700 animate-pulse",
   scoring: "bg-purple-500/20 text-purple-700 animate-pulse",
@@ -101,11 +102,11 @@ export function VideoDetailPanel({ video, transcript, transcriptError, clips, cl
   const displayStateKey =
     isUrlImportSource && effectiveImportState && effectiveImportState !== "processing"
       ? effectiveImportState
-      : video.status;
+      : video.display_status || video.status;
   const displayStateLabel =
     isUrlImportSource && effectiveImportState && effectiveImportState !== "processing"
       ? importStateLabel(effectiveImportState)
-      : video.status.charAt(0).toUpperCase() + video.status.slice(1);
+      : (video.display_status || video.status).charAt(0).toUpperCase() + (video.display_status || video.status).slice(1);
   const isBlockedImport =
     Boolean(video.is_download_blocked) ||
     Boolean(effectiveImportState && BLOCKED_IMPORT_STATES.has(effectiveImportState));

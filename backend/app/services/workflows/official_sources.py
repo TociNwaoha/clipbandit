@@ -827,7 +827,7 @@ def import_source_post(source_post_id: str) -> dict:
                 },
                 storage_key=storage_key,
                 file_size_bytes=size_bytes,
-                status=VideoStatus.transcribing,
+                status=VideoStatus.queued,
             )
             db.add(video)
             job = Job(
@@ -846,7 +846,21 @@ def import_source_post(source_post_id: str) -> dict:
 
         from app.worker.tasks.transcribe import transcribe_job
 
-        task = transcribe_job.apply_async(args=[video_id_str], queue="transcribe")
+        try:
+            task = transcribe_job.apply_async(args=[video_id_str], queue="transcribe")
+        except Exception as exc:
+            with SyncSessionLocal() as db:
+                job = db.get(Job, job_id)
+                video = db.get(Video, uuid.UUID(video_id_str))
+                if job:
+                    job.status = JobStatus.failed
+                    job.error = f"Unable to enqueue transcription: {exc}"[:500]
+                    job.completed_at = datetime.now(timezone.utc)
+                if video:
+                    video.status = VideoStatus.error
+                    video.error_message = "Unable to queue transcription. Please retry."
+                db.commit()
+            raise
         with SyncSessionLocal() as db:
             job = db.get(Job, job_id)
             if job:
