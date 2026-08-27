@@ -981,7 +981,7 @@ export function ClipEditorPanel({ video, initialClip, initialExports, initialSch
           <p className="mt-1 text-xs text-[var(--app-muted)]">
             Source preview with current clip boundaries and caption style preview for selected export settings.
           </p>
-          <div className="mt-3 grid gap-3 xl:grid-cols-2">
+          <div className="mt-3 grid gap-3 lg:grid-cols-2">
             <div>
               <div className="mb-2 flex items-center justify-between text-xs text-[var(--app-muted)]">
                 <span>Source Preview</span>
@@ -990,7 +990,10 @@ export function ClipEditorPanel({ video, initialClip, initialExports, initialSch
               <div
                 ref={framingOverlayRef}
                 className="relative overflow-hidden rounded-lg border border-[var(--app-border)] bg-black"
-                style={{ aspectRatio: `${effectiveSourceAspectRatio}` }}
+                style={{
+                  aspectRatio: `${effectiveSourceAspectRatio}`,
+                  maxHeight: "min(62vh, 640px)",
+                }}
               >
                 {sourceUrl ? (
                   <video
@@ -1055,7 +1058,10 @@ export function ClipEditorPanel({ video, initialClip, initialExports, initialSch
               <div
                 ref={framedPreviewRef}
                 className="relative overflow-hidden rounded-lg border border-[var(--app-border)] bg-black"
-                style={{ aspectRatio: outputPreviewAspectRatioValue }}
+                style={{
+                  aspectRatio: outputPreviewAspectRatioValue,
+                  maxHeight: "min(62vh, 640px)",
+                }}
               >
                 {sourceUrl ? (
                   <video
