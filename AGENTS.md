@@ -79,10 +79,12 @@ If you are unsure which you are, you are a builder.
   on the VPS from a fresh, non-production checkout of the exact pushed candidate SHA (never
   `/opt/clipbandit`). Build a temporary candidate image from that checkout, then run actual
   imports (for example, `python -c "import app.worker.tasks.transcribe"`) and the affected
-  tests in that image. The verification container must have no production `.env`, database,
-  Redis, bind mounts, volumes, ports, or network access. Tests needing services require
-  dedicated disposable test services; local compilation or locally passing tests are never
-  sufficient evidence for a production change.
+  tests in that image. The temporary build phase may use outbound public network access for
+  package and `next/font/google` fetches, but it must have no production `.env`, database,
+  Redis, bind mounts, volumes, or ports. Runtime import and test containers must have no
+  network access and no production `.env`, database, Redis, bind mounts, volumes, or ports.
+  Tests needing services require dedicated disposable test services; local compilation or
+  locally passing tests are never sufficient evidence for a production change.
 - Any module loaded during backend or worker startup requires an explicit import or boot
   check before deployment. A failure there can take down every task handled by that
   process, not only the path being changed.
